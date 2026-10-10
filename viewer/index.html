@@ -138,17 +138,21 @@
         material.uniforms.uRenderMode = { value: 0 };
         material.uniforms.uCameraNear = { value: activeViewer.camera.near };
         material.uniforms.uCameraFar = { value: activeViewer.camera.far };
+        material.uniforms.uDepthMin = { value: activeViewer.camera.near };
+        material.uniforms.uDepthMax = { value: activeViewer.camera.far };
         material.fragmentShader = material.fragmentShader
-          .replace('uniform vec3 debugColor;', 'uniform vec3 debugColor;\nuniform int uRenderMode;\nuniform float uCameraNear;\nuniform float uCameraFar;')
+          .replace('uniform vec3 debugColor;', 'uniform vec3 debugColor;\nuniform int uRenderMode;\nuniform float uCameraNear;\nuniform float uCameraFar;\nuniform float uDepthMin;\nuniform float uDepthMax;')
           .replace('vec3 color = vColor.rgb;', `
                 vec3 color = vColor.rgb;
                 if (uRenderMode != 0) {
                     float depthNdc = gl_FragCoord.z * 2.0 - 1.0;
                     float viewDepth = (2.0 * uCameraNear * uCameraFar) / max(0.00001, uCameraFar + uCameraNear - depthNdc * (uCameraFar - uCameraNear));
-                    float normalizedDepth = clamp(viewDepth / uCameraFar, 0.0, 1.0);
+                    float normalizedDepth = clamp((viewDepth - uDepthMin) / max(0.00001, uDepthMax - uDepthMin), 0.0, 1.0);
                     if (uRenderMode == 1) {
                         float t = 1.0 - normalizedDepth;
-                        color = clamp(vec3(1.5 - abs(4.0 * t - 3.0), 1.5 - abs(4.0 * t - 2.0), 1.5 - abs(4.0 * t - 1.0)), 0.0, 1.0);
+                        color = t < 0.5
+                            ? mix(vec3(0.10, 0.18, 0.72), vec3(0.08, 0.82, 0.76), t * 2.0)
+                            : mix(vec3(0.08, 0.82, 0.76), vec3(1.00, 0.86, 0.22), (t - 0.5) * 2.0);
                     } else {
                         float dx = dFdx(viewDepth);
                         float dy = dFdy(viewDepth);
@@ -162,6 +166,9 @@
       material.uniforms.uRenderMode.value = values[renderMode] ?? 0;
       material.uniforms.uCameraNear.value = activeViewer.camera.near;
       material.uniforms.uCameraFar.value = activeViewer.camera.far;
+      const focusDistance = activeViewer.camera.position.distanceTo(activeViewer.controls?.target || activeViewer.camera.position);
+      material.uniforms.uDepthMin.value = Math.max(activeViewer.camera.near, focusDistance * 0.3);
+      material.uniforms.uDepthMax.value = Math.max(material.uniforms.uDepthMin.value + 0.01, focusDistance * 2.0);
       material.uniformsNeedUpdate = true;
       if (shaderChanged) material.needsUpdate = true;
       activeViewer.forceRenderNextFrame();
