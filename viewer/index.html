@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#101311" />
+  <title>Gaussian Splatting | Interactive Scene</title>
+  <style>
+    :root { color-scheme: dark; --bg:#101311; --panel:#171b18; --line:#303833; --muted:#a0aaa3; --text:#eef3ee; --lime:#b4e36d; --orange:#ffb36b; }
+    * { box-sizing:border-box }
+    body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 Inter, "Segoe UI", system-ui, sans-serif; }
+    button, input, select { font:inherit }
+    button { color:inherit; cursor:pointer }
+    .app { min-height:100vh; display:grid; grid-template-rows:58px minmax(0,1fr); }
+    header { display:flex; align-items:center; justify-content:space-between; padding:0 22px; border-bottom:1px solid var(--line); background:#131714; }
+    .brand { display:flex; align-items:center; gap:11px; font-weight:650; letter-spacing:.2px }
+    .mark { width:26px; height:26px; display:grid; place-items:center; color:#101311; background:var(--lime); border-radius:7px; font-weight:800 }
+    .brand small { display:block; color:var(--muted); font-size:11px; font-weight:450 }
+    .head-right { display:flex; align-items:center; gap:14px; color:var(--muted); font-size:12px }
+    .online { color:var(--lime); display:flex; align-items:center; gap:7px }
+    .online:before { content:""; width:7px; height:7px; background:currentColor; border-radius:50% }
+    main { min-height:0; display:grid; grid-template-columns:minmax(0,1fr) 320px; }
+    .stage { min-height:420px; position:relative; overflow:hidden; background:#0b0e0c; border-right:1px solid var(--line) }
+    #viewer { position:absolute; inset:0 }
+    #viewer canvas { display:block; width:100%; height:100%; outline:none }
+    .stage-top { position:absolute; z-index:2; top:18px; left:20px; right:20px; display:flex; justify-content:space-between; align-items:flex-start; pointer-events:none }
+    .scene-title { text-shadow:0 1px 8px #000; pointer-events:auto }
+    .eyebrow { color:var(--lime); font-size:10px; letter-spacing:1.1px; text-transform:uppercase }
+    h1 { margin:4px 0 0; font-size:20px; font-weight:600 }
+    .stage-actions { display:flex; gap:8px; pointer-events:auto }
+    .icon-btn, .secondary, .primary { border:1px solid #465149; background:#1b211d; border-radius:5px; min-height:34px; padding:0 11px; }
+    .icon-btn { width:36px; padding:0; font-size:17px }
+    .icon-btn:hover, .secondary:hover { background:#272f29 }
+    .primary { border-color:var(--lime); background:var(--lime); color:#17200e; font-weight:650 }
+    .primary:hover { background:#c5ed88 }
+    .stage-bottom { position:absolute; z-index:2; bottom:15px; left:18px; right:18px; display:flex; justify-content:space-between; align-items:end; pointer-events:none }
+    .hint, .load-status { padding:8px 10px; color:#d8e0d9; background:#101411d9; border:1px solid #343b36; border-radius:5px; font-size:11px; pointer-events:auto }
+    .hint kbd { color:var(--lime); font:inherit }
+    #load-status { color:var(--lime) }
+    .side { overflow:auto; padding:18px 18px 20px; background:var(--panel) }
+    .side-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px }
+    .side h2 { margin:0; font-size:14px; font-weight:650 }
+    .tag { border:1px solid #435040; border-radius:4px; padding:2px 6px; color:var(--lime); font-size:10px }
+    .field { margin:14px 0 }
+    .label-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; color:#dce3dd; font-size:12px }
+    .label-row span:last-child { color:var(--muted); font-variant-numeric:tabular-nums }
+    .vec { display:grid; grid-template-columns:repeat(3,1fr); gap:6px }
+    .vec input { min-width:0; width:100%; border:1px solid #38413a; background:#101411; border-radius:4px; padding:7px; color:#e8eee9; font-size:11px }
+    .vec input:focus { outline:1px solid var(--lime); border-color:var(--lime) }
+    .mode-select { width:100%; border:1px solid #38413a; background:#101411; border-radius:4px; padding:8px 9px; color:#e8eee9; }
+    .mode-select:focus { outline:1px solid var(--lime); border-color:var(--lime) }
+    .mode-note { margin-top:5px; color:var(--muted); font-size:10px }
+    input[type=range] { accent-color:var(--lime); width:100%; height:18px; margin:0 }
+    .side-buttons { display:flex; gap:8px; margin-top:17px }
+    .side-buttons button { flex:1 }
+    .side-buttons + .side-buttons { margin-top:8px }
+    .file-input { display:none }
+    .details { border-top:1px solid var(--line); margin-top:18px; padding-top:15px }
+    .details h3 { margin:0 0 9px; color:#cfd8d1; font-size:11px; text-transform:uppercase; letter-spacing:.7px }
+    .stat { display:flex; justify-content:space-between; padding:5px 0; color:var(--muted); font-size:11px }
+    .stat strong { color:#e0e8e1; font-weight:500 }
+    @media(max-width:900px) { .app { grid-template-rows:54px minmax(0,1fr) } main { grid-template-columns:minmax(0,1fr) 280px } }
+    @media(max-width:650px) { .app { min-height:100dvh; grid-template-rows:52px minmax(490px,1fr) } header { padding:0 13px } .head-right .hint-top { display:none } main { grid-template-columns:1fr; grid-template-rows:minmax(320px,1fr) auto } .stage { border-right:0; min-height:320px } .side { max-height:43vh; border-top:1px solid var(--line); padding:13px 15px } h1 { font-size:17px } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="brand"><div class="mark">G</div><div>Gaussian Splatting <small>Interactive Scene Viewer</small></div></div>
+      <div class="head-right"><span class="hint-top">Lego / Synthetic NeRF</span><span class="online">本地模型</span></div>
+    </header>
+    <main>
+      <section class="stage" aria-label="3D 场景视图">
+        <div id="viewer"></div>
+        <div class="stage-top">
+          <div class="scene-title"><div class="eyebrow">3D Gaussian Splatting</div><h1>Lego 场景</h1></div>
+          <div class="stage-actions">
+            <button class="icon-btn" id="reset-view" title="重置视角" aria-label="重置视角">⌖</button>
+            <button class="icon-btn" id="fullscreen" title="全屏" aria-label="全屏">⛶</button>
+            <button class="icon-btn" id="toggle-debug" title="显示调试信息" aria-label="显示调试信息">ⓘ</button>
+          </div>
+        </div>
+        <div class="stage-bottom"><div class="hint"><kbd>拖动</kbd> 旋转 · <kbd>右键</kbd> 平移 · <kbd>滚轮</kbd> 缩放</div><div id="load-status" class="load-status">正在载入场景…</div></div>
+      </section>
+      <aside class="side">
+        <div class="side-head"><h2>Scene controls</h2><span class="tag">PLY · 3DGS</span></div>
+        <div class="field"><div class="label-row"><label>Camera position</label></div><div class="vec"><input id="px" type="number" step="0.1" value="0"><input id="py" type="number" step="0.1" value="4.2"><input id="pz" type="number" step="0.1" value="1.5"></div></div>
+        <div class="field"><div class="label-row"><label>Camera look-at</label></div><div class="vec"><input id="tx" type="number" step="0.1" value="0"><input id="ty" type="number" step="0.1" value="0"><input id="tz" type="number" step="0.1" value="0"></div></div>
+        <div class="field" id="render-mode-field"><div class="label-row"><label for="render-mode">渲染模式</label></div><select class="mode-select" id="render-mode"><option value="color">彩色外观</option><option value="depth">深度图</option><option value="normal">法向估计</option></select><div class="mode-note" id="mode-note">原始 Gaussian 颜色与透明度</div></div>
+        <div class="field"><div class="label-row"><label for="alpha">Minimum alpha</label><span id="alpha-value">1</span></div><input id="alpha" type="range" min="0" max="30" value="1"></div>
+        <div class="side-buttons"><button class="secondary" id="apply-camera">应用视角</button><button class="primary" id="load-file">加载 PLY</button><input class="file-input" id="file-picker" type="file" accept=".ply,.splat,.ksplat"></div>
+        <div class="side-buttons"><button class="secondary" id="save-view">保存视角</button><button class="secondary" id="restore-view">恢复视角</button></div>
+        <div class="side-buttons"><button class="secondary" id="export-ksplat">导出 KSPLAT</button></div>
+        <div class="details"><h3>Scene information</h3><div class="stat"><span>训练迭代</span><strong>3,000</strong></div><div class="stat"><span>表示格式</span><strong>Gaussian PLY</strong></div><div class="stat"><span>交互</span><strong>Orbit · Pan · Zoom</strong></div><div class="stat"><span>状态</span><strong id="debug-state">初始化中</strong></div></div>
+      </aside>
+    </main>
+  </div>
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+  </script>
+  <script type="module">
+    import * as GaussianSplats3D from 'https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.7/build/gaussian-splats-3d.module.js';
+
+    const container = document.getElementById('viewer');
+    const sceneName = new URLSearchParams(location.search).get('name');
+    const embedded = new URLSearchParams(location.search).get('embedded') === '1';
+    if (embedded) document.getElementById('render-mode-field').hidden = true;
+    if (sceneName) {
+      document.querySelector('.scene-title h1').textContent = sceneName;
+      document.querySelector('.head-right .hint-top').textContent = 'Custom photo reconstruction';
+    }
+    const status = document.getElementById('load-status');
+    const debug = document.getElementById('debug-state');
+    const initialPosition = [0, 4.2, 1.5];
+    const initialLookAt = [0, 0, 0];
+    let viewer;
+    let viewerGeneration = 0;
+    const bundledModelUrl = '../assets/lego_3000_3dgs.ply';
+    const requestedModelUrl = new URLSearchParams(location.search).get('model');
+    const modelUrlIsLocal = requestedModelUrl && new URL(requestedModelUrl, location.href).origin === location.origin;
+    let modelUrl = modelUrlIsLocal ? requestedModelUrl : bundledModelUrl;
+    let modelName = modelUrl.split('/').pop().replace(/\.[^.]+$/, '');
+    let modelIsPly = /\.ply(?:$|\?)/i.test(modelUrl);
+    let localModelUrl;
+    let debugVisible = false;
+    let renderMode = 'color';
+    const modeNotes = {
+      color: '原始 Gaussian 颜色与透明度',
+      depth: '近处亮、远处暗；随当前相机视角变化',
+      normal: '由屏幕空间深度梯度估算的法向，不是训练时保存的网格法线'
+    };
+
+    function installRenderModes(activeViewer) {
+      const material = activeViewer?.splatMesh?.material;
+      if (!material?.fragmentShader || !material.uniforms) return false;
+      let shaderChanged = false;
+      if (!material.uniforms.uRenderMode) {
+        material.uniforms.uRenderMode = { value: 0 };
+        material.uniforms.uCameraNear = { value: activeViewer.camera.near };
+        material.uniforms.uCameraFar = { value: activeViewer.camera.far };
+        material.fragmentShader = material.fragmentShader
+          .replace('uniform vec3 debugColor;', 'uniform vec3 debugColor;\nuniform int uRenderMode;\nuniform float uCameraNear;\nuniform float uCameraFar;')
+          .replace('vec3 color = vColor.rgb;', `
+                vec3 color = vColor.rgb;
+                if (uRenderMode != 0) {
+                    float depthNdc = gl_FragCoord.z * 2.0 - 1.0;
+                    float viewDepth = (2.0 * uCameraNear * uCameraFar) / max(0.00001, uCameraFar + uCameraNear - depthNdc * (uCameraFar - uCameraNear));
+                    float normalizedDepth = clamp(viewDepth / uCameraFar, 0.0, 1.0);
+                    if (uRenderMode == 1) {
+                        float t = 1.0 - normalizedDepth;
+                        color = clamp(vec3(1.5 - abs(4.0 * t - 3.0), 1.5 - abs(4.0 * t - 2.0), 1.5 - abs(4.0 * t - 1.0)), 0.0, 1.0);
+                    } else {
+                        float dx = dFdx(viewDepth);
+                        float dy = dFdy(viewDepth);
+                        vec3 normal = normalize(vec3(-dx * 2.0, -dy * 2.0, 1.0));
+                        color = normal * 0.5 + 0.5;
+                    }
+                }`);
+        shaderChanged = true;
+      }
+      const values = { color: 0, depth: 1, normal: 2 };
+      material.uniforms.uRenderMode.value = values[renderMode] ?? 0;
+      material.uniforms.uCameraNear.value = activeViewer.camera.near;
+      material.uniforms.uCameraFar.value = activeViewer.camera.far;
+      material.uniformsNeedUpdate = true;
+      if (shaderChanged) material.needsUpdate = true;
+      activeViewer.forceRenderNextFrame();
+      return true;
+    }
+
+    function setRenderMode(mode) {
+      renderMode = mode;
+      document.getElementById('mode-note').textContent = modeNotes[mode];
+      if (viewer) installRenderModes(viewer);
+    }
+
+    function values(ids) { return ids.map(id => Number(document.getElementById(id).value) || 0); }
+    function setStatus(text) { status.textContent = text; debug.textContent = text; }
+    function applyCamera(position, lookAt, up = [0, 0, 1]) {
+      if (!viewer) return;
+      const camera = viewer.camera;
+      camera.up.set(...up);
+      camera.position.set(...position);
+      if (viewer.controls) {
+        viewer.controls.target.set(...lookAt);
+        viewer.controls.update();
+      } else {
+        camera.lookAt(...lookAt);
+      }
+      viewer.forceRenderNextFrame();
+    }
+
+    async function buildViewer(position, lookAt, alpha) {
+      const generation = ++viewerGeneration;
+      const previousViewer = viewer;
+      viewer = undefined;
+      if (previousViewer) await previousViewer.dispose();
+      if (generation !== viewerGeneration) return;
+      container.replaceChildren();
+      viewer = new GaussianSplats3D.Viewer({
+        rootElement: container,
+        cameraUp: [0, 0, 1],
+        initialCameraPosition: position,
+        initialCameraLookAt: lookAt,
+        sharedMemoryForWorkers: false,
+        gpuAcceleratedSort: false,
+        sphericalHarmonicsDegree: 0,
+        antialiased: true,
+        logLevel: GaussianSplats3D.LogLevel.Warning
+      });
+      setStatus('正在解码 Gaussian PLY…');
+      viewer.addSplatScene(modelUrl, {
+        splatAlphaRemovalThreshold: alpha,
+        showLoadingUI: false,
+        progressiveLoad: true
+      }).then(() => {
+        installRenderModes(viewer);
+        viewer.start();
+        setStatus('场景已就绪');
+        if (parent !== window) parent.postMessage({ type: '3dgs-viewer-ready' }, location.origin);
+      }).catch(error => {
+        console.error(error);
+        setStatus(`加载失败：${error?.message || '查看浏览器控制台'}`);
+      });
+    }
+
+    buildViewer(initialPosition, initialLookAt, 1);
+    document.getElementById('apply-camera').addEventListener('click', () => applyCamera(values(['px','py','pz']), values(['tx','ty','tz'])));
+    document.getElementById('render-mode').addEventListener('change', event => setRenderMode(event.target.value));
+    window.addEventListener('message', event => {
+      if (event.source !== parent || event.origin !== location.origin) return;
+      if (event.data?.type === '3dgs-render-mode' && ['color', 'depth', 'normal'].includes(event.data.mode)) {
+        document.getElementById('render-mode').value = event.data.mode;
+        setRenderMode(event.data.mode);
+      }
+    });
+    document.getElementById('alpha').addEventListener('input', event => { document.getElementById('alpha-value').textContent = event.target.value; });
+    document.getElementById('alpha').addEventListener('change', () => buildViewer(values(['px','py','pz']), values(['tx','ty','tz']), Number(document.getElementById('alpha').value)));
+    document.getElementById('reset-view').addEventListener('click', () => {
+      ['px','py','pz'].forEach((id, i) => document.getElementById(id).value = initialPosition[i]);
+      ['tx','ty','tz'].forEach((id, i) => document.getElementById(id).value = initialLookAt[i]);
+      applyCamera(initialPosition, initialLookAt);
+    });
+    document.getElementById('fullscreen').addEventListener('click', () => document.querySelector('.stage').requestFullscreen?.());
+    document.getElementById('toggle-debug').addEventListener('click', () => {
+      debugVisible = !debugVisible;
+      document.querySelector('.details').style.display = debugVisible ? 'block' : 'none';
+    });
+    document.getElementById('save-view').addEventListener('click', () => {
+      if (!viewer) return;
+      const preset = {
+        cameraPosition: viewer.camera.position.toArray(),
+        cameraLookAt: viewer.controls?.target.toArray() || initialLookAt,
+        cameraUp: viewer.camera.up.toArray()
+      };
+      localStorage.setItem('gaussian-splatting-view', JSON.stringify(preset));
+      const blobUrl = URL.createObjectURL(new Blob([JSON.stringify(preset, null, 2)], { type:'application/json' }));
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `${modelName}-view.json`;
+      link.click();
+      URL.revokeObjectURL(blobUrl);
+      setStatus('视角已保存并下载');
+    });
+    document.getElementById('restore-view').addEventListener('click', () => {
+      const saved = localStorage.getItem('gaussian-splatting-view');
+      if (!saved) { setStatus('还没有保存的视角'); return; }
+      const preset = JSON.parse(saved);
+      ['px','py','pz'].forEach((id, i) => document.getElementById(id).value = preset.cameraPosition[i]);
+      ['tx','ty','tz'].forEach((id, i) => document.getElementById(id).value = preset.cameraLookAt[i]);
+      applyCamera(preset.cameraPosition, preset.cameraLookAt, preset.cameraUp);
+      setStatus('已恢复保存的视角');
+    });
+    document.getElementById('export-ksplat').addEventListener('click', async event => {
+      if (!modelIsPly) { setStatus('KSPLAT 导出目前需要 PLY 模型'); return; }
+      const button = event.currentTarget;
+      button.disabled = true;
+      setStatus('正在转换 KSPLAT…');
+      try {
+        const splatBuffer = await GaussianSplats3D.PlyLoader.loadFromURL(
+          modelUrl, null, false, null, Number(document.getElementById('alpha').value), 1, true, 0
+        );
+        GaussianSplats3D.KSplatLoader.downloadFile(splatBuffer, `${modelName}.ksplat`);
+        setStatus('KSPLAT 已导出');
+      } catch (error) {
+        console.error(error);
+        setStatus(`导出失败：${error?.message || '请检查模型文件'}`);
+      } finally {
+        button.disabled = false;
+      }
+    });
+    document.getElementById('load-file').addEventListener('click', () => document.getElementById('file-picker').click());
+    document.getElementById('file-picker').addEventListener('change', async event => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const localUrl = URL.createObjectURL(file);
+      if (localModelUrl) URL.revokeObjectURL(localModelUrl);
+      localModelUrl = localUrl;
+      modelUrl = localUrl;
+      modelName = file.name.replace(/\.[^.]+$/, '');
+      modelIsPly = /\.ply$/i.test(file.name);
+      const generation = ++viewerGeneration;
+      const previousViewer = viewer;
+      viewer = undefined;
+      if (previousViewer) await previousViewer.dispose();
+      if (generation !== viewerGeneration) return;
+      container.replaceChildren();
+      viewer = new GaussianSplats3D.Viewer({ rootElement:container, cameraUp:[0,0,1], initialCameraPosition:initialPosition, initialCameraLookAt:initialLookAt, sharedMemoryForWorkers:false, gpuAcceleratedSort:false, sphericalHarmonicsDegree:0, antialiased:true });
+      setStatus(`载入 ${file.name}…`);
+      viewer.addSplatScene(localUrl, { showLoadingUI:false, progressiveLoad:true }).then(() => { installRenderModes(viewer); viewer.start(); setStatus(`已载入 ${file.name}`); if (parent !== window) parent.postMessage({ type: '3dgs-viewer-ready' }, location.origin); }).catch(error => { console.error(error); setStatus('文件载入失败'); URL.revokeObjectURL(localUrl); });
+    });
+  </script>
+</body>
+</html>

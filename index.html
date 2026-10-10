@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f9f7">
+  <meta name="description" content="Interactive 3D Gaussian Splatting reconstruction of the synthetic NeRF Lego scene.">
+  <title>Lego Scene | 3D Gaussian Splatting</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="wordmark" href="#top" aria-label="Lego project home"><span class="wordmark-mark">3D</span><span>FIELD NOTES <b>/</b> 01</span></a>
+    <nav aria-label="Main navigation">
+      <a href="#overview">Overview</a>
+      <a href="#viewer-section">Viewer</a>
+      <a href="#results">Results</a>
+      <a href="#citation">Citation</a>
+      <button class="library-button" id="open-library" type="button">项目库</button>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero page-width">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="live-dot"></span> SYNTHETIC NERF · NOVEL VIEW SYNTHESIS</p>
+        <h1>Reconstructing the<br><em>Lego Scene</em> with 3D Gaussian Splatting</h1>
+        <p class="hero-deck">A real-time radiance field built from posed images, represented as a compact set of optimizable 3D Gaussians.</p>
+        <div class="authors" aria-label="Project authors">
+          <span>Team Member A</span><span>Team Member B</span><span>Team Member C</span>
+        </div>
+        <p class="affiliation">[Institution / Course Name]</p>
+        <div class="hero-links">
+          <a class="pill-link primary-link" href="https://arxiv.org/abs/2308.04079" target="_blank" rel="noreferrer">Paper <span aria-hidden="true">↗</span></a>
+          <a class="pill-link" href="https://github.com/graphdeco-inria/gaussian-splatting" target="_blank" rel="noreferrer">Code <span aria-hidden="true">↗</span></a>
+          <a class="pill-link" href="#citation">BibTeX <span aria-hidden="true">↓</span></a>
+        </div>
+      </div>
+      <div class="hero-art" aria-label="Lego scene training render">
+        <img src="assets/lego-render.png" alt="3D Gaussian Splatting training render of the Lego scene">
+        <div class="art-coordinate coord-a">LEGO <i>·</i> TRAIN VIEW 035</div>
+        <div class="art-coordinate coord-b">GAUSSIAN FIELD <i>///</i> 3K</div>
+        <div class="art-caption"><span>REAL TRAINING RENDER</span><span>134,826 GAUSSIANS</span></div>
+      </div>
+    </section>
+
+    <section class="metric-strip" aria-label="Model facts">
+      <div class="page-width metric-grid">
+        <div class="metric"><strong>3,000</strong><span>TRAINING ITERATIONS</span></div>
+        <div class="metric"><strong>134,826</strong><span>GAUSSIAN POINTS</span></div>
+        <div class="metric"><strong>31.9 MB</strong><span>PLY MODEL SIZE</span></div>
+      </div>
+    </section>
+
+    <section class="section page-width" id="overview">
+      <div class="section-heading"><span class="section-index">01</span><div><p class="eyebrow">PROJECT OVERVIEW</p><h2>From posed Lego views<br>to a navigable scene</h2></div></div>
+      <div class="overview-copy">
+        <p class="lead">A 3D Gaussian Splatting reconstruction trained on the synthetic NeRF Lego scene.</p>
+        <p>Starting from camera poses and a sparse point cloud, the method initializes anisotropic 3D Gaussians and jointly optimizes their position, covariance, opacity, and appearance. Adaptive density control adds or removes Gaussians where image-space errors remain high. The resulting representation supports fast, continuous rendering from new camera positions.</p>
+        <p>The saved model contains <b>134,826 Gaussians</b> after <b>3,000 iterations</b>. The viewer below loads the trained PLY directly; the images show one matching training view and its reconstruction.</p>
+      </div>
+    </section>
+
+    <section class="method-band">
+      <div class="page-width method-inner">
+        <div class="section-heading"><span class="section-index">02</span><div><p class="eyebrow">METHOD</p><h2>Image space ↔ Gaussian space</h2></div></div>
+        <div class="pipeline" aria-label="Reconstruction pipeline">
+          <article class="pipeline-step"><span class="step-label">INPUT / 01</span><div class="mini-frames"><i></i><i></i><i></i></div><h3>Posed images</h3><p>Training views and camera calibration</p></article>
+          <span class="pipeline-arrow" aria-hidden="true">→</span>
+          <article class="pipeline-step"><span class="step-label">INITIALIZE / 02</span><div class="mini-cloud"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><h3>Sparse structure</h3><p>Seed Gaussians from scene geometry</p></article>
+          <span class="pipeline-arrow" aria-hidden="true">→</span>
+          <article class="pipeline-step"><span class="step-label">OPTIMIZE / 03</span><div class="mini-gaussians"><i></i><i></i><i></i><i></i></div><h3>Adaptive fitting</h3><p>Photometric loss and density control</p></article>
+          <span class="pipeline-arrow" aria-hidden="true">→</span>
+          <article class="pipeline-step"><span class="step-label">OUTPUT / 04</span><div class="mini-view"><i></i><i></i><i></i></div><h3>Novel views</h3><p>Real-time Gaussian rasterization</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section page-width viewer-section" id="viewer-section">
+      <div class="section-heading viewer-heading"><span class="section-index">03</span><div><p class="eyebrow">INTERACTIVE RECONSTRUCTION</p><h2>Explore the scene</h2></div><div class="viewer-heading-tools"><div class="render-switch" role="group" aria-label="渲染模式"><button type="button" data-render-mode="color" aria-pressed="true">彩色</button><button type="button" data-render-mode="depth" aria-pressed="false">深度</button><button type="button" data-render-mode="normal" aria-pressed="false">法向</button></div><span class="section-aside">DRAG TO ORBIT <b>·</b> SCROLL TO ZOOM</span></div></div>
+      <div id="viewer" aria-label="Interactive 3D Gaussian Splatting viewer">
+        <iframe src="viewer/index.html?embedded=1" title="Interactive Lego Gaussian Splatting viewer" loading="lazy" allowfullscreen></iframe>
+      </div>
+    </section>
+
+    <section class="section results-section" id="results">
+      <div class="page-width">
+        <div class="section-heading"><span class="section-index">04</span><div><p class="eyebrow">TRAINING VIEW</p><h2>Reference and reconstruction</h2></div><span class="section-aside">VIEW 035 <b>·</b> 3K ITERATIONS</span></div>
+        <div class="comparison-grid">
+          <figure class="result-frame">
+            <img class="result-image" src="assets/lego-gt.png" alt="Ground-truth training image for view 00035">
+            <figcaption><span>GROUND TRUTH · TRAIN VIEW 035</span><code>lego-gt.png</code></figcaption>
+          </figure>
+          <figure class="result-frame">
+            <img class="result-image" src="assets/lego-render.png" alt="3D Gaussian Splatting reconstruction for training view 00035">
+            <figcaption><span>3DGS RENDER · TRAIN VIEW 035</span><code>lego-render.png</code></figcaption>
+          </figure>
+        </div>
+        <p class="asset-note">Both images use the same training camera. They illustrate the saved 3,000-iteration model; no held-out quality metrics are claimed here.</p>
+        <div class="metric-table-wrap"><table><thead><tr><th>Scene</th><th>Split</th><th>Iterations</th><th>Gaussians</th><th>Model</th></tr></thead><tbody><tr><td>Synthetic NeRF Lego</td><td>Training view 035</td><td>3,000</td><td>134,826</td><td>31.9 MB PLY</td></tr></tbody></table></div>
+      </div>
+    </section>
+
+    <section class="section page-width citation-section" id="citation">
+      <div class="section-heading"><span class="section-index">05</span><div><p class="eyebrow">REFERENCE</p><h2>Paper & citation</h2></div></div>
+      <div class="citation-copy"><p>Method reference: Bernhard Kerbl, Georgios Kopanas, Thomas Leimkühler, and George Drettakis. <i>3D Gaussian Splatting for Real-Time Radiance Field Rendering.</i> ACM Transactions on Graphics, 42(4), 2023.</p><a href="https://arxiv.org/abs/2308.04079" target="_blank" rel="noreferrer">Read the paper ↗</a></div>
+      <pre class="bibtex"><code>@article{kerbl2023gaussians,
+  author  = {Kerbl, Bernhard and Kopanas, Georgios and Leimk{"u}hler, Thomas and Drettakis, George},
+  title   = {3D Gaussian Splatting for Real-Time Radiance Field Rendering},
+  journal = {ACM Transactions on Graphics},
+  volume  = {42},
+  number  = {4},
+  year    = {2023}
+}</code></pre>
+    </section>
+  </main>
+
+  <dialog class="library-dialog" id="library-dialog" aria-labelledby="library-title">
+    <div class="library-head"><div><p class="eyebrow">LOCAL WORKSPACE</p><h2 id="library-title">我的 3DGS 项目</h2></div><button class="close-dialog" id="close-library" type="button" aria-label="关闭">×</button></div>
+    <div class="library-body">
+      <section class="library-section"><h3>已保存的 Demo</h3><div id="project-list" class="project-list"><p class="library-muted">正在读取项目…</p></div></section>
+      <section class="library-section new-project-section"><h3>从照片新建场景</h3>
+        <label class="form-label" for="project-name">场景名称</label><input id="project-name" class="text-input" maxlength="60" placeholder="例如：办公室桌面">
+        <label class="photo-drop" for="photo-picker"><span class="drop-icon">＋</span><span><b>选择拍摄照片</b><small>至少 20 张，JPG / PNG</small></span><input id="photo-picker" type="file" accept="image/jpeg,image/png" multiple></label>
+        <div id="photo-review" class="photo-review" aria-live="polite">尚未选择照片</div>
+        <label class="coverage-confirm"><input id="coverage-confirm" type="checkbox"> 我已从物体四周拍摄，且相邻照片有明显重叠</label>
+        <button id="create-project" class="create-project-button" type="button" disabled>创建项目并检查照片</button>
+        <div id="train-readiness" class="readiness" aria-live="polite">读取本机重建环境…</div>
+        <p class="library-footnote">照片仅保存在本机项目目录。需 COLMAP 完成相机位姿估计后，才会启动 3DGS GPU 训练并生成独立 Demo。</p>
+      </section>
+    </div>
+  </dialog>
+
+  <footer class="site-footer"><div class="page-width"><span>LEGO SCENE · 3D GAUSSIAN SPLATTING</span><a href="#top">BACK TO TOP ↑</a><span>PROJECT PAGE · 2026</span></div></footer>
+  <script src="project-library.js" defer></script>
+</body>
+</html>
