@@ -219,7 +219,7 @@
       viewer.addSplatScene(modelUrl, {
         splatAlphaRemovalThreshold: alpha,
         showLoadingUI: false,
-        progressiveLoad: true
+        progressiveLoad: false
       }).then(() => {
         installRenderModes(viewer);
         viewer.start();
@@ -314,7 +314,7 @@
       container.replaceChildren();
       viewer = new GaussianSplats3D.Viewer({ rootElement:container, cameraUp:[0,0,1], initialCameraPosition:initialPosition, initialCameraLookAt:initialLookAt, sharedMemoryForWorkers:false, gpuAcceleratedSort:false, sphericalHarmonicsDegree:0, antialiased:true });
       setStatus(`载入 ${file.name}…`);
-      viewer.addSplatScene(localUrl, { showLoadingUI:false, progressiveLoad:true }).then(() => { installRenderModes(viewer); viewer.start(); setStatus(`已载入 ${file.name}`); if (parent !== window) parent.postMessage({ type: '3dgs-viewer-ready' }, location.origin); }).catch(error => { console.error(error); setStatus('文件载入失败'); URL.revokeObjectURL(localUrl); });
+      viewer.addSplatScene(localUrl, { showLoadingUI:false, progressiveLoad:false }).then(() => { installRenderModes(viewer); viewer.start(); setStatus(`已载入 ${file.name}`); if (parent !== window) parent.postMessage({ type: '3dgs-viewer-ready' }, location.origin); }).catch(error => { console.error(error); setStatus('文件载入失败'); URL.revokeObjectURL(localUrl); });
     });
   </script>
 </body>
