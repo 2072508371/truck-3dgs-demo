@@ -126,8 +126,8 @@
     let renderMode = 'color';
     const modeNotes = {
       color: '原始 Gaussian 颜色与透明度',
-      depth: '近处亮、远处暗；随当前相机视角变化',
-      normal: '由屏幕空间深度梯度估算的法向，不是训练时保存的网格法线'
+      depth: '黑色表示近处，白色表示远处；随相机视角变化',
+      normal: '由归一化深度梯度估算；3DGS 不含真实网格法线'
     };
 
     function installRenderModes(activeViewer) {
@@ -149,14 +149,11 @@
                     float viewDepth = (2.0 * uCameraNear * uCameraFar) / max(0.00001, uCameraFar + uCameraNear - depthNdc * (uCameraFar - uCameraNear));
                     float normalizedDepth = clamp((viewDepth - uDepthMin) / max(0.00001, uDepthMax - uDepthMin), 0.0, 1.0);
                     if (uRenderMode == 1) {
-                        float t = 1.0 - normalizedDepth;
-                        color = t < 0.5
-                            ? mix(vec3(0.10, 0.18, 0.72), vec3(0.08, 0.82, 0.76), t * 2.0)
-                            : mix(vec3(0.08, 0.82, 0.76), vec3(1.00, 0.86, 0.22), (t - 0.5) * 2.0);
+                        color = vec3(normalizedDepth);
                     } else {
-                        float dx = dFdx(viewDepth);
-                        float dy = dFdy(viewDepth);
-                        vec3 normal = normalize(vec3(-dx * 2.0, -dy * 2.0, 1.0));
+                        float dx = clamp(dFdx(normalizedDepth), -0.015, 0.015);
+                        float dy = clamp(dFdy(normalizedDepth), -0.015, 0.015);
+                        vec3 normal = normalize(vec3(-dx * 400.0, -dy * 400.0, 1.0));
                         color = normal * 0.5 + 0.5;
                     }
                 }`);
@@ -168,7 +165,7 @@
       material.uniforms.uCameraFar.value = activeViewer.camera.far;
       const focusDistance = activeViewer.camera.position.distanceTo(activeViewer.controls?.target || activeViewer.camera.position);
       material.uniforms.uDepthMin.value = Math.max(activeViewer.camera.near, focusDistance * 0.3);
-      material.uniforms.uDepthMax.value = Math.max(material.uniforms.uDepthMin.value + 0.01, focusDistance * 2.0);
+      material.uniforms.uDepthMax.value = Math.max(material.uniforms.uDepthMin.value + 0.01, focusDistance * 2.5);
       material.uniformsNeedUpdate = true;
       if (shaderChanged) material.needsUpdate = true;
       activeViewer.forceRenderNextFrame();
