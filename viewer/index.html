@@ -50,6 +50,12 @@
     .mode-select { width:100%; border:1px solid #38413a; background:#101411; border-radius:4px; padding:8px 9px; color:#e8eee9; }
     .mode-select:focus { outline:1px solid var(--lime); border-color:var(--lime) }
     .mode-note { margin-top:5px; color:var(--muted); font-size:10px }
+    .tuning-group { border-top:1px solid var(--line); margin-top:16px; padding-top:13px }
+    .tuning-group h3 { margin:0 0 10px; color:#cfd8d1; font-size:11px; text-transform:uppercase; letter-spacing:.5px }
+    .tuning-control { margin:10px 0 13px }
+    .tuning-label { display:flex; justify-content:space-between; gap:8px; margin-bottom:3px; color:#dce3dd; font-size:11px }
+    .tuning-label output { color:var(--lime); font-variant-numeric:tabular-nums }
+    .tuning-control input[type=range] { height:15px }
     input[type=range] { accent-color:var(--lime); width:100%; height:18px; margin:0 }
     .side-buttons { display:flex; gap:8px; margin-top:17px }
     .side-buttons button { flex:1 }
@@ -87,6 +93,20 @@
         <div class="field"><div class="label-row"><label>Camera position</label></div><div class="vec"><input id="px" type="number" step="0.1" value="0"><input id="py" type="number" step="0.1" value="4.2"><input id="pz" type="number" step="0.1" value="1.5"></div></div>
         <div class="field"><div class="label-row"><label>Camera look-at</label></div><div class="vec"><input id="tx" type="number" step="0.1" value="0"><input id="ty" type="number" step="0.1" value="0"><input id="tz" type="number" step="0.1" value="0"></div></div>
         <div class="field" id="render-mode-field"><div class="label-row"><label for="render-mode">渲染模式</label></div><select class="mode-select" id="render-mode"><option value="color">彩色外观</option><option value="depth">深度图</option><option value="normal">法向估计</option></select><div class="mode-note" id="mode-note">原始 Gaussian 颜色与透明度</div></div>
+        <section class="tuning-group" aria-label="渲染参数">
+          <h3>渲染参数</h3>
+          <div class="tuning-control" id="depth-tuning" hidden>
+            <label class="tuning-label" for="depth-near"><span>深度起点 × 焦点距离</span><output id="depth-near-value">0.30</output></label>
+            <input id="depth-near" type="range" min="0.05" max="1.5" step="0.05" value="0.3">
+            <label class="tuning-label" for="depth-far"><span>深度终点 × 焦点距离</span><output id="depth-far-value">2.50</output></label>
+            <input id="depth-far" type="range" min="0.5" max="6" step="0.1" value="2.5">
+          </div>
+          <div class="tuning-control" id="normal-tuning" hidden>
+            <label class="tuning-label" for="normal-strength"><span>法向梯度强度</span><output id="normal-strength-value">400</output></label>
+            <input id="normal-strength" type="range" min="50" max="1200" step="25" value="400">
+          </div>
+          <div class="mode-note">参数只影响当前显示，不会修改 PLY 模型。</div>
+        </section>
         <div class="field"><div class="label-row"><label for="alpha">Minimum alpha</label><span id="alpha-value">1</span></div><input id="alpha" type="range" min="0" max="30" value="1"></div>
         <div class="side-buttons"><button class="secondary" id="apply-camera">应用视角</button><button class="primary" id="load-file">加载 PLY</button><input class="file-input" id="file-picker" type="file" accept=".ply,.splat,.ksplat"></div>
         <div class="side-buttons"><button class="secondary" id="save-view">保存视角</button><button class="secondary" id="restore-view">恢复视角</button></div>
@@ -140,8 +160,9 @@
         material.uniforms.uCameraFar = { value: activeViewer.camera.far };
         material.uniforms.uDepthMin = { value: activeViewer.camera.near };
         material.uniforms.uDepthMax = { value: activeViewer.camera.far };
+        material.uniforms.uNormalStrength = { value: Number(document.getElementById('normal-strength').value) };
         material.fragmentShader = material.fragmentShader
-          .replace('uniform vec3 debugColor;', 'uniform vec3 debugColor;\nuniform int uRenderMode;\nuniform float uCameraNear;\nuniform float uCameraFar;\nuniform float uDepthMin;\nuniform float uDepthMax;')
+          .replace('uniform vec3 debugColor;', 'uniform vec3 debugColor;\nuniform int uRenderMode;\nuniform float uCameraNear;\nuniform float uCameraFar;\nuniform float uDepthMin;\nuniform float uDepthMax;\nuniform float uNormalStrength;')
           .replace('vec3 color = vColor.rgb;', `
                 vec3 color = vColor.rgb;
                 if (uRenderMode != 0) {
@@ -153,7 +174,7 @@
                     } else {
                         float dx = clamp(dFdx(normalizedDepth), -0.015, 0.015);
                         float dy = clamp(dFdy(normalizedDepth), -0.015, 0.015);
-                        vec3 normal = normalize(vec3(-dx * 400.0, -dy * 400.0, 1.0));
+                        vec3 normal = normalize(vec3(-dx * uNormalStrength, -dy * uNormalStrength, 1.0));
                         color = normal * 0.5 + 0.5;
                     }
                 }`);
@@ -164,8 +185,11 @@
       material.uniforms.uCameraNear.value = activeViewer.camera.near;
       material.uniforms.uCameraFar.value = activeViewer.camera.far;
       const focusDistance = activeViewer.camera.position.distanceTo(activeViewer.controls?.target || activeViewer.camera.position);
-      material.uniforms.uDepthMin.value = Math.max(activeViewer.camera.near, focusDistance * 0.3);
-      material.uniforms.uDepthMax.value = Math.max(material.uniforms.uDepthMin.value + 0.01, focusDistance * 2.5);
+      const nearFactor = Number(document.getElementById('depth-near').value);
+      const farFactor = Number(document.getElementById('depth-far').value);
+      material.uniforms.uDepthMin.value = Math.max(activeViewer.camera.near, focusDistance * nearFactor);
+      material.uniforms.uDepthMax.value = Math.max(material.uniforms.uDepthMin.value + 0.01, focusDistance * farFactor);
+      material.uniforms.uNormalStrength.value = Number(document.getElementById('normal-strength').value);
       material.uniformsNeedUpdate = true;
       if (shaderChanged) material.needsUpdate = true;
       activeViewer.forceRenderNextFrame();
@@ -175,6 +199,21 @@
     function setRenderMode(mode) {
       renderMode = mode;
       document.getElementById('mode-note').textContent = modeNotes[mode];
+      document.getElementById('depth-tuning').hidden = mode !== 'depth';
+      document.getElementById('normal-tuning').hidden = mode !== 'normal';
+      if (viewer) installRenderModes(viewer);
+    }
+
+    function updateTuning(event) {
+      const near = document.getElementById('depth-near');
+      const far = document.getElementById('depth-far');
+      if (Number(far.value) <= Number(near.value)) {
+        if (event.target === near) far.value = Math.min(Number(far.max), Number(near.value) + 0.1).toFixed(1);
+        else near.value = Math.max(Number(near.min), Number(far.value) - 0.1).toFixed(2);
+      }
+      document.getElementById('depth-near-value').value = Number(near.value).toFixed(2);
+      document.getElementById('depth-far-value').value = Number(far.value).toFixed(2);
+      document.getElementById('normal-strength-value').value = document.getElementById('normal-strength').value;
       if (viewer) installRenderModes(viewer);
     }
 
@@ -228,9 +267,11 @@
       });
     }
 
+    setRenderMode(renderMode);
     buildViewer(initialPosition, initialLookAt, 1);
     document.getElementById('apply-camera').addEventListener('click', () => applyCamera(values(['px','py','pz']), values(['tx','ty','tz'])));
     document.getElementById('render-mode').addEventListener('change', event => setRenderMode(event.target.value));
+    ['depth-near', 'depth-far', 'normal-strength'].forEach(id => document.getElementById(id).addEventListener('input', updateTuning));
     window.addEventListener('message', event => {
       if (event.source !== parent || event.origin !== location.origin) return;
       if (event.data?.type === '3dgs-render-mode' && ['color', 'depth', 'normal'].includes(event.data.mode)) {
