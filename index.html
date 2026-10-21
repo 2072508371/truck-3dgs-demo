@@ -10,7 +10,7 @@
 </head>
 <body>
   <header class="site-header">
-    <a class="wordmark" href="#top" aria-label="Lego project home"><span class="wordmark-mark">3D</span><span>FIELD NOTES <b>/</b> 01</span></a>
+    <a class="wordmark" href="#top" aria-label="3DGS project home"><span class="wordmark-mark">3D</span><span>FIELD NOTES <b>/</b> 01</span></a>
     <nav aria-label="Main navigation">
       <a href="#overview">Overview</a>
       <a href="#viewer-section">Viewer</a>
@@ -31,8 +31,9 @@
           <a class="pill-link" href="https://github.com/graphdeco-inria/gaussian-splatting" target="_blank" rel="noreferrer">Code <span aria-hidden="true">↗</span></a>
           <a class="pill-link" href="#citation">BibTeX <span aria-hidden="true">↓</span></a>
         </div>
+        <label class="demo-picker" for="demo-select"><span>正在查看</span><select id="demo-select" aria-label="选择示例 Demo"></select></label>
       </div>
-      <div class="hero-art" aria-label="Lego scene training render">
+      <div class="hero-art" aria-label="Selected scene training render">
         <img src="assets/lego-render.png" alt="3D Gaussian Splatting training render of the Lego scene">
         <div class="art-coordinate coord-a">LEGO <i>·</i> TRAIN VIEW 035</div>
         <div class="art-coordinate coord-b">GAUSSIAN FIELD <i>///</i> 3K</div>
@@ -49,7 +50,7 @@
     </section>
 
     <section class="section page-width" id="overview">
-      <div class="section-heading"><span class="section-index">01</span><div><p class="eyebrow">PROJECT OVERVIEW</p><h2>From posed Lego views<br>to a navigable scene</h2></div></div>
+      <div class="section-heading"><span class="section-index">01</span><div><p class="eyebrow">PROJECT OVERVIEW</p><h2 id="overview-title">From posed Lego views<br>to a navigable scene</h2></div></div>
       <div class="overview-copy">
         <p class="lead">A 3D Gaussian Splatting reconstruction trained on the synthetic NeRF Lego scene.</p>
         <p>Starting from camera poses and a sparse point cloud, the method initializes anisotropic 3D Gaussians and jointly optimizes their position, covariance, opacity, and appearance. Adaptive density control adds or removes Gaussians where image-space errors remain high. The resulting representation supports fast, continuous rendering from new camera positions.</p>
@@ -73,15 +74,16 @@
     </section>
 
     <section class="section page-width viewer-section" id="viewer-section">
-      <div class="section-heading viewer-heading"><span class="section-index">03</span><div><p class="eyebrow">INTERACTIVE RECONSTRUCTION</p><h2>Explore the scene</h2></div><div class="viewer-heading-tools"><div class="render-switch" role="group" aria-label="渲染模式"><button type="button" data-render-mode="color" aria-pressed="true">彩色</button><button type="button" data-render-mode="depth" aria-pressed="false">深度</button><button type="button" data-render-mode="normal" aria-pressed="false">法向</button></div><span class="section-aside">DRAG TO ORBIT <b>·</b> SCROLL TO ZOOM</span></div></div>
+      <div class="section-heading viewer-heading"><span class="section-index">03</span><div><p class="eyebrow">INTERACTIVE RECONSTRUCTION</p><h2>Explore <span id="viewer-scene-name">the scene</span></h2></div><div class="viewer-heading-tools"><div class="render-switch" role="group" aria-label="交互查看器渲染模式"><button type="button" data-render-mode="color" aria-pressed="true">彩色</button><button type="button" data-render-mode="depth" aria-pressed="false">深度</button><button type="button" data-render-mode="normal" aria-pressed="false">法向</button></div><span class="section-aside">DRAG TO ORBIT <b>·</b> SCROLL TO ZOOM</span></div></div>
       <div id="viewer" aria-label="Interactive 3D Gaussian Splatting viewer">
-        <iframe src="viewer/index.html?embedded=1" title="Interactive Lego Gaussian Splatting viewer" loading="lazy" allowfullscreen></iframe>
+          <iframe src="viewer/index.html?embedded=1&v=normal-hybrid-23" title="Interactive Gaussian Splatting viewer" loading="lazy" allowfullscreen></iframe>
       </div>
+      <p class="viewer-render-status" id="viewer-render-status" aria-live="polite">交互彩色渲染</p>
     </section>
 
     <section class="section results-section" id="results">
       <div class="page-width">
-        <div class="section-heading"><span class="section-index">04</span><div><p class="eyebrow">TRAINING VIEW</p><h2>Reference and reconstruction</h2></div><span class="section-aside">VIEW 035 <b>·</b> 3K ITERATIONS</span></div>
+        <div class="section-heading"><span class="section-index">04</span><div><p class="eyebrow">TRAINING VIEW</p><h2>Reference and reconstruction</h2></div><span class="section-aside" id="result-view-label">VIEW 035 <b>·</b> 3K ITERATIONS</span></div>
         <div class="comparison-grid">
           <figure class="result-frame">
             <img class="result-image" src="assets/lego-gt.png" alt="Ground-truth training image for view 00035">
@@ -127,7 +129,7 @@
     </div>
   </dialog>
 
-  <footer class="site-footer"><div class="page-width"><span>LEGO SCENE · 3D GAUSSIAN SPLATTING</span><a href="#top">BACK TO TOP ↑</a><span>PROJECT PAGE · 2026</span></div></footer>
-  <script src="project-library.js" defer></script>
+  <footer class="site-footer"><div class="page-width"><span id="footer-scene-name">LEGO SCENE · 3D GAUSSIAN SPLATTING</span><a href="#top">BACK TO TOP ↑</a><span>PROJECT PAGE · 2026</span></div></footer>
+  <script src="project-library.js?v=scene-demos-4" defer></script>
 </body>
 </html>

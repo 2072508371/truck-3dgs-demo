@@ -21,8 +21,17 @@
     .online:before { content:""; width:7px; height:7px; background:currentColor; border-radius:50% }
     main { min-height:0; display:grid; grid-template-columns:minmax(0,1fr) 320px; }
     .stage { min-height:420px; position:relative; overflow:hidden; background:#0b0e0c; border-right:1px solid var(--line) }
+    .offline-preview { position:absolute; z-index:1; inset:0; width:100%; height:100%; object-fit:contain; background:#0b0e0c }
+    .offline-notice { position:absolute; z-index:3; left:18px; right:18px; bottom:66px; margin:0 auto; width:max-content; max-width:calc(100% - 36px); padding:8px 10px; border:1px solid #465149; border-radius:4px; color:#dce3dd; background:#101411eF; font-size:11px; text-align:center }
+    .stage.depth-mode .scene-title { color:#182019; text-shadow:none }
+    .stage.depth-mode .eyebrow { color:#426b34 }
+    .stage.depth-mode .icon-btn { color:#182019; border-color:#69746b; background:#f5f7f4 }
+    .stage.depth-mode .icon-btn:hover { background:#e7ece6 }
+    .stage.normal-mode .scene-title { color:#eef3ee; text-shadow:0 1px 8px #000 }
+    .stage.normal-mode .eyebrow { color:var(--lime) }
     #viewer { position:absolute; inset:0 }
     #viewer canvas { display:block; width:100%; height:100%; outline:none }
+    #geometry-overlay { position:absolute; z-index:1; inset:0; width:100%; height:100%; object-fit:fill; pointer-events:none }
     .stage-top { position:absolute; z-index:2; top:18px; left:20px; right:20px; display:flex; justify-content:space-between; align-items:flex-start; pointer-events:none }
     .scene-title { text-shadow:0 1px 8px #000; pointer-events:auto }
     .eyebrow { color:var(--lime); font-size:10px; letter-spacing:1.1px; text-transform:uppercase }
@@ -56,6 +65,8 @@
     .tuning-label { display:flex; justify-content:space-between; gap:8px; margin-bottom:3px; color:#dce3dd; font-size:11px }
     .tuning-label output { color:var(--lime); font-variant-numeric:tabular-nums }
     .tuning-control input[type=range] { height:15px }
+    .toggle-row { display:flex; align-items:center; justify-content:space-between; min-height:30px; color:#dce3dd; font-size:11px }
+    .toggle-row input { width:16px; height:16px; accent-color:var(--lime) }
     input[type=range] { accent-color:var(--lime); width:100%; height:18px; margin:0 }
     .side-buttons { display:flex; gap:8px; margin-top:17px }
     .side-buttons button { flex:1 }
@@ -78,6 +89,9 @@
     <main>
       <section class="stage" aria-label="3D 场景视图">
         <div id="viewer"></div>
+        <img id="geometry-overlay" alt="CUS-GS 几何渲染" hidden>
+        <img id="offline-preview" class="offline-preview" alt="所选 checkpoint 的训练视角预览" hidden>
+        <p id="offline-notice" class="offline-notice" hidden>实时查看器模块不可达，当前显示该 Demo 的训练视角预览。</p>
         <div class="stage-top">
           <div class="scene-title"><div class="eyebrow">3D Gaussian Splatting</div><h1>Lego 场景</h1></div>
           <div class="stage-actions">
@@ -92,43 +106,101 @@
         <div class="side-head"><h2>Scene controls</h2><span class="tag">PLY · 3DGS</span></div>
         <div class="field"><div class="label-row"><label>Camera position</label></div><div class="vec"><input id="px" type="number" step="0.1" value="0"><input id="py" type="number" step="0.1" value="4.2"><input id="pz" type="number" step="0.1" value="1.5"></div></div>
         <div class="field"><div class="label-row"><label>Camera look-at</label></div><div class="vec"><input id="tx" type="number" step="0.1" value="0"><input id="ty" type="number" step="0.1" value="0"><input id="tz" type="number" step="0.1" value="0"></div></div>
-        <div class="field" id="render-mode-field"><div class="label-row"><label for="render-mode">渲染模式</label></div><select class="mode-select" id="render-mode"><option value="color">彩色外观</option><option value="depth">深度图</option><option value="normal">法向估计</option></select><div class="mode-note" id="mode-note">原始 Gaussian 颜色与透明度</div></div>
+    <div class="field" id="render-mode-field"><div class="label-row"><label for="render-mode">渲染模式</label></div><select class="mode-select" id="render-mode"><option value="color">彩色外观</option><option value="depth">GPU 实时深度图</option><option value="normal">CUS-GS 法向图</option></select><div class="mode-note" id="mode-note">原始 Gaussian 颜色与透明度</div></div>
         <section class="tuning-group" aria-label="渲染参数">
           <h3>渲染参数</h3>
           <div class="tuning-control" id="depth-tuning" hidden>
             <label class="tuning-label" for="depth-near"><span>深度起点 × 焦点距离</span><output id="depth-near-value">0.30</output></label>
             <input id="depth-near" type="range" min="0.05" max="1.5" step="0.05" value="0.3">
-            <label class="tuning-label" for="depth-far"><span>深度终点 × 焦点距离</span><output id="depth-far-value">2.50</output></label>
-            <input id="depth-far" type="range" min="0.5" max="6" step="0.1" value="2.5">
+            <label class="tuning-label" for="depth-far"><span>深度终点 × 焦点距离</span><output id="depth-far-value">1.30</output></label>
+            <input id="depth-far" type="range" min="0.5" max="6" step="0.1" value="1.3">
           </div>
-          <div class="tuning-control" id="normal-tuning" hidden>
-            <label class="tuning-label" for="normal-strength"><span>法向梯度强度</span><output id="normal-strength-value">400</output></label>
-            <input id="normal-strength" type="range" min="50" max="1200" step="25" value="400">
-          </div>
-          <div class="mode-note">参数只影响当前显示，不会修改 PLY 模型。</div>
+          <div class="mode-note" id="depth-note" hidden>深度图由浏览器 GPU 实时绘制；法向图使用本机 CUS-GS CUDA 光栅器。</div>
         </section>
-        <div class="field"><div class="label-row"><label for="alpha">Minimum alpha</label><span id="alpha-value">1</span></div><input id="alpha" type="range" min="0" max="30" value="1"></div>
+        <section class="tuning-group" aria-label="渲染器设置">
+          <h3>渲染器设置</h3>
+          <div id="viewer-renderer-controls">
+          <div class="field">
+            <div class="label-row"><label for="sh-degree">球谐阶数</label></div>
+            <select class="mode-select" id="sh-degree"><option value="0">0 · 快速</option><option value="1">1</option><option value="2">2 · 完整</option></select>
+          </div>
+          <label class="toggle-row" for="gpu-sort"><span>GPU 排序（当前环境禁用）</span><input id="gpu-sort" type="checkbox" disabled></label>
+          <div class="mode-note">实测开启会导致画布黑屏；当前锁定关闭，使用默认排序。</div>
+          <label class="toggle-row" for="antialias"><span>抗锯齿</span><input id="antialias" type="checkbox" checked></label>
+          </div>
+          <div class="tuning-control" id="geometry-resolution-control">
+            <label class="tuning-label" for="geometry-resolution"><span>静止法向图分辨率上限</span><output id="geometry-resolution-value">768 px</output></label>
+            <input id="geometry-resolution" type="range" min="256" max="768" step="128" value="768">
+            <div class="mode-note">拖动相机时临时限制为 256 px；停止后按此上限精细更新。</div>
+          </div>
+          <div class="tuning-control" id="geometry-fps-control">
+            <label class="tuning-label" for="geometry-fps"><span>交互法向更新上限</span><output id="geometry-fps-value">12 fps</output></label>
+            <input id="geometry-fps" type="range" min="5" max="20" step="1" value="12">
+          </div>
+          <div class="tuning-control" id="normal-contrast-control" hidden>
+            <label class="tuning-label" for="normal-contrast"><span>法向对比度</span><output id="normal-contrast-value">1.80×</output></label>
+            <input id="normal-contrast" type="range" min="0.5" max="2" step="0.05" value="1.8">
+          </div>
+          <div class="field" id="normal-method-control" hidden>
+            <div class="label-row"><label for="normal-method">法向来源</label></div>
+            <select class="mode-select" id="normal-method"><option value="hybrid">融合表面法向（推荐）</option><option value="depth">CUS-GS 深度反投影</option><option value="gaussian">Gaussian 短轴表面估计</option></select>
+            <div class="mode-note">融合稳定的高斯短轴方向与深度几何细节；也可单独查看两种来源。</div>
+          </div>
+          <div class="tuning-control" id="normal-smoothing-control" hidden>
+            <label class="tuning-label" for="normal-smoothing"><span>法向边缘保留平滑</span><output id="normal-smoothing-value">1.2×</output></label>
+            <input id="normal-smoothing" type="range" min="0" max="2.5" step="0.1" value="1.2">
+            <div class="mode-note">抑制表面深度抖动；按深度边缘加权，尽量保留物体轮廓。0 为关闭。</div>
+          </div>
+        </section>
+        <div class="field" id="alpha-control"><div class="label-row"><label for="alpha">最小透明度阈值</label><span id="alpha-value">1 / 255</span></div><input id="alpha" type="range" min="0" max="30" value="1"><div class="mode-note">仅对彩色/深度查看器生效；重新载入 Gaussian 时剔除低于该值的 splat。</div></div>
         <div class="side-buttons"><button class="secondary" id="apply-camera">应用视角</button><button class="primary" id="load-file">加载 PLY</button><input class="file-input" id="file-picker" type="file" accept=".ply,.splat,.ksplat"></div>
         <div class="side-buttons"><button class="secondary" id="save-view">保存视角</button><button class="secondary" id="restore-view">恢复视角</button></div>
         <div class="side-buttons"><button class="secondary" id="export-ksplat">导出 KSPLAT</button></div>
-        <div class="details"><h3>Scene information</h3><div class="stat"><span>训练迭代</span><strong>3,000</strong></div><div class="stat"><span>表示格式</span><strong>Gaussian PLY</strong></div><div class="stat"><span>交互</span><strong>Orbit · Pan · Zoom</strong></div><div class="stat"><span>状态</span><strong id="debug-state">初始化中</strong></div></div>
+        <div class="details"><h3>Scene information</h3><div class="stat"><span>训练迭代</span><strong id="viewer-iterations">3,000</strong></div><div class="stat"><span>表示格式</span><strong>Gaussian PLY</strong></div><div class="stat"><span>交互</span><strong>Orbit · Pan · Zoom</strong></div><div class="stat"><span>状态</span><strong id="debug-state">初始化中</strong></div></div>
       </aside>
     </main>
   </div>
   <script type="importmap">
     { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
   </script>
+  <script>
+    const bootParams = new URLSearchParams(location.search);
+    const preview = document.getElementById('offline-preview');
+    const offlineNotice = document.getElementById('offline-notice');
+    const previewUrl = bootParams.get('preview');
+    if (previewUrl && new URL(previewUrl, location.href).origin === location.origin) preview.src = previewUrl;
+    if (bootParams.get('name')) document.querySelector('.scene-title h1').textContent = bootParams.get('name');
+    if (bootParams.get('iterations')) document.getElementById('viewer-iterations').textContent = Number(bootParams.get('iterations')).toLocaleString();
+    if (bootParams.get('demoId')?.endsWith('-3000') || bootParams.get('demoId')?.startsWith('lego-')) document.querySelector('.head-right .hint-top').textContent = `Synthetic NeRF · ${Number(bootParams.get('iterations') || 3000).toLocaleString()} iterations`;
+    function showOfflinePreview() {
+      if (preview.src) {
+        preview.hidden = false;
+        offlineNotice.hidden = false;
+        document.getElementById('load-status').textContent = '训练视角预览';
+      }
+    }
+    window.addEventListener('error', event => {
+      if (event.target?.tagName === 'SCRIPT' && event.target.type === 'module') showOfflinePreview();
+    }, true);
+    window.setTimeout(() => { if (!window.__gaussianViewerReady) showOfflinePreview(); }, 12000);
+  </script>
   <script type="module">
     import * as GaussianSplats3D from 'https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.7/build/gaussian-splats-3d.module.js';
+    import * as THREE from 'three';
 
     const container = document.getElementById('viewer');
+    const demoId = new URLSearchParams(location.search).get('demoId') || 'lego-3000';
     const sceneName = new URLSearchParams(location.search).get('name');
+    const sceneIterations = new URLSearchParams(location.search).get('iterations');
     const embedded = new URLSearchParams(location.search).get('embedded') === '1';
     if (embedded) document.getElementById('render-mode-field').hidden = true;
+    const hasLocalGeometryService = ['localhost', '127.0.0.1'].includes(location.hostname);
+    if (!hasLocalGeometryService) document.querySelector('#render-mode option[value="normal"]').disabled = true;
     if (sceneName) {
       document.querySelector('.scene-title h1').textContent = sceneName;
-      document.querySelector('.head-right .hint-top').textContent = 'Custom photo reconstruction';
+      document.querySelector('.head-right .hint-top').textContent = demoId.endsWith('-3000') || demoId.startsWith('lego-') ? `Synthetic NeRF · ${Number(sceneIterations || 3000).toLocaleString()} iterations` : 'Custom photo reconstruction';
     }
+    if (sceneIterations) document.getElementById('viewer-iterations').textContent = Number(sceneIterations).toLocaleString();
     const status = document.getElementById('load-status');
     const debug = document.getElementById('debug-state');
     const initialPosition = [0, 4.2, 1.5];
@@ -139,15 +211,25 @@
     const requestedModelUrl = new URLSearchParams(location.search).get('model');
     const modelUrlIsLocal = requestedModelUrl && new URL(requestedModelUrl, location.href).origin === location.origin;
     let modelUrl = modelUrlIsLocal ? requestedModelUrl : bundledModelUrl;
+    let supportsCusGeometry = hasLocalGeometryService && modelUrlIsLocal && ['lego-100', 'lego-1000', 'lego-3000', 'chair-3000', 'drums-3000'].includes(demoId);
     let modelName = modelUrl.split('/').pop().replace(/\.[^.]+$/, '');
     let modelIsPly = /\.ply(?:$|\?)/i.test(modelUrl);
     let localModelUrl;
     let debugVisible = false;
     let renderMode = 'color';
+    let geometryTimer;
+    let geometryRequestId = 0;
+    let geometryObjectUrl;
+    let geometryInFlight = false;
+    let geometryPending = false;
+    let geometryLastStartedAt = 0;
+    let isInteracting = false;
+    let lastGeometryMode;
+    const geometryOverlay = document.getElementById('geometry-overlay');
     const modeNotes = {
       color: '原始 Gaussian 颜色与透明度',
-      depth: '黑色表示近处，白色表示远处；随相机视角变化',
-      normal: '由归一化深度梯度估算；3DGS 不含真实网格法线'
+      depth: '浏览器 WebGL GPU 实时深度着色；随相机连续更新',
+      normal: 'CUS-GS CUDA 深度反投影法向；随当前相机重新渲染'
     };
 
     function installRenderModes(activeViewer) {
@@ -160,27 +242,19 @@
         material.uniforms.uCameraFar = { value: activeViewer.camera.far };
         material.uniforms.uDepthMin = { value: activeViewer.camera.near };
         material.uniforms.uDepthMax = { value: activeViewer.camera.far };
-        material.uniforms.uNormalStrength = { value: Number(document.getElementById('normal-strength').value) };
         material.fragmentShader = material.fragmentShader
-          .replace('uniform vec3 debugColor;', 'uniform vec3 debugColor;\nuniform int uRenderMode;\nuniform float uCameraNear;\nuniform float uCameraFar;\nuniform float uDepthMin;\nuniform float uDepthMax;\nuniform float uNormalStrength;')
+          .replace('uniform vec3 debugColor;', 'uniform vec3 debugColor;\nuniform int uRenderMode;\nuniform float uCameraNear;\nuniform float uCameraFar;\nuniform float uDepthMin;\nuniform float uDepthMax;')
           .replace('vec3 color = vColor.rgb;', `
                 vec3 color = vColor.rgb;
                 if (uRenderMode != 0) {
                     float depthNdc = gl_FragCoord.z * 2.0 - 1.0;
                     float viewDepth = (2.0 * uCameraNear * uCameraFar) / max(0.00001, uCameraFar + uCameraNear - depthNdc * (uCameraFar - uCameraNear));
                     float normalizedDepth = clamp((viewDepth - uDepthMin) / max(0.00001, uDepthMax - uDepthMin), 0.0, 1.0);
-                    if (uRenderMode == 1) {
-                        color = vec3(normalizedDepth);
-                    } else {
-                        float dx = clamp(dFdx(normalizedDepth), -0.015, 0.015);
-                        float dy = clamp(dFdy(normalizedDepth), -0.015, 0.015);
-                        vec3 normal = normalize(vec3(-dx * uNormalStrength, -dy * uNormalStrength, 1.0));
-                        color = normal * 0.5 + 0.5;
-                    }
+                    color = vec3(normalizedDepth);
                 }`);
         shaderChanged = true;
       }
-      const values = { color: 0, depth: 1, normal: 2 };
+      const values = { color: 0, depth: 1, normal: 0 };
       material.uniforms.uRenderMode.value = values[renderMode] ?? 0;
       material.uniforms.uCameraNear.value = activeViewer.camera.near;
       material.uniforms.uCameraFar.value = activeViewer.camera.far;
@@ -189,7 +263,10 @@
       const farFactor = Number(document.getElementById('depth-far').value);
       material.uniforms.uDepthMin.value = Math.max(activeViewer.camera.near, focusDistance * nearFactor);
       material.uniforms.uDepthMax.value = Math.max(material.uniforms.uDepthMin.value + 0.01, focusDistance * farFactor);
-      material.uniforms.uNormalStrength.value = Number(document.getElementById('normal-strength').value);
+      if (activeViewer.renderer) {
+        activeViewer.renderer.setClearColor(renderMode === 'depth' ? 0xffffff : 0x000000, renderMode === 'depth' ? 1 : 0);
+      }
+      if (activeViewer.threeScene) activeViewer.threeScene.background = renderMode === 'depth' ? new THREE.Color(0xffffff) : null;
       material.uniformsNeedUpdate = true;
       if (shaderChanged) material.needsUpdate = true;
       activeViewer.forceRenderNextFrame();
@@ -197,11 +274,123 @@
     }
 
     function setRenderMode(mode) {
+      if (!['color', 'depth', 'normal'].includes(mode)) return;
+      if (mode !== renderMode) {
+        geometryRequestId++;
+        clearTimeout(geometryTimer);
+        if (mode === 'color') geometryPending = false;
+      }
       renderMode = mode;
       document.getElementById('mode-note').textContent = modeNotes[mode];
       document.getElementById('depth-tuning').hidden = mode !== 'depth';
-      document.getElementById('normal-tuning').hidden = mode !== 'normal';
-      if (viewer) installRenderModes(viewer);
+      document.getElementById('depth-note').hidden = !['depth', 'normal'].includes(mode);
+      document.getElementById('normal-contrast-control').hidden = mode !== 'normal';
+      document.getElementById('normal-method-control').hidden = mode !== 'normal';
+      document.getElementById('normal-smoothing-control').hidden = mode !== 'normal';
+      document.getElementById('geometry-resolution-control').hidden = mode !== 'normal';
+      document.getElementById('geometry-fps-control').hidden = mode !== 'normal';
+      document.getElementById('viewer-renderer-controls').hidden = mode === 'normal';
+      document.getElementById('alpha-control').hidden = mode === 'normal';
+      document.querySelector('.stage').classList.toggle('depth-mode', mode === 'depth');
+      document.querySelector('.stage').classList.toggle('normal-mode', mode === 'normal');
+      geometryOverlay.hidden = mode !== 'normal';
+      if (viewer) {
+        if (viewer.renderer?.domElement) viewer.renderer.domElement.style.opacity = mode === 'normal' ? '0' : '1';
+        installRenderModes(viewer);
+        if (mode === 'depth') setStatus('浏览器 GPU 深度渲染已就绪');
+        if (mode === 'normal') {
+          if (lastGeometryMode !== mode) geometryOverlay.removeAttribute('src');
+          lastGeometryMode = mode;
+          queueGeometryRender(0);
+        }
+      }
+    }
+
+    function queueGeometryRender(delay = 0) {
+      if (!viewer || renderMode !== 'normal') return;
+      clearTimeout(geometryTimer);
+      const updateInterval = 1000 / Number(document.getElementById('geometry-fps').value);
+      const throttle = Math.max(0, (isInteracting ? updateInterval : 250) - (performance.now() - geometryLastStartedAt));
+      geometryTimer = setTimeout(() => {
+        if (geometryInFlight) {
+          geometryPending = true;
+          return;
+        }
+        renderGeometry();
+      }, Math.max(delay, throttle));
+    }
+
+    async function renderGeometry() {
+      if (!viewer || renderMode !== 'normal') return;
+      if (geometryInFlight) {
+        geometryPending = true;
+        return;
+      }
+      geometryInFlight = true;
+      geometryLastStartedAt = performance.now();
+      const requestId = ++geometryRequestId;
+      const requestedMode = renderMode;
+      const normalMethod = document.getElementById('normal-method').value;
+      const camera = viewer.camera;
+      camera.updateMatrixWorld(true);
+      const bounds = container.getBoundingClientRect();
+      const maxDimension = isInteracting ? Math.min(256, Number(document.getElementById('geometry-resolution').value)) : Number(document.getElementById('geometry-resolution').value);
+      const scale = Math.min(1, maxDimension / Math.max(bounds.width, bounds.height));
+      const width = Math.max(128, Math.round(bounds.width * scale));
+      const height = Math.max(128, Math.round(bounds.height * scale));
+      const focusDistance = camera.position.distanceTo(viewer.controls?.target || camera.position);
+      setStatus('CUS-GS 正在按当前视角计算几何图…');
+      if (parent !== window) parent.postMessage({ type: '3dgs-geometry-progress' }, location.origin);
+      try {
+        if (!supportsCusGeometry) throw new Error('CUS-GS 实时几何渲染目前仅支持内置训练检查点。');
+        const response = await fetch('/api/geometry/render', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: requestedMode,
+            modelId: demoId,
+            viewMatrix: Array.from(camera.matrixWorldInverse.elements),
+            cameraPosition: camera.position.toArray(),
+            fovy: THREE.MathUtils.degToRad(camera.fov),
+            width,
+            height,
+            focusDistance,
+            normalContrast: Number(document.getElementById('normal-contrast').value),
+            normalSmoothing: Number(document.getElementById('normal-smoothing').value),
+            normalMethod,
+          })
+        });
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || `Local CUDA service returned ${response.status}`);
+        }
+        const blobUrl = URL.createObjectURL(await response.blob());
+        if (requestId !== geometryRequestId || renderMode !== requestedMode) {
+          URL.revokeObjectURL(blobUrl);
+          return;
+        }
+        if (geometryObjectUrl) URL.revokeObjectURL(geometryObjectUrl);
+        geometryObjectUrl = blobUrl;
+        geometryOverlay.src = blobUrl;
+        geometryOverlay.alt = requestedMode === 'depth' ? 'CUS-GS per-pixel depth at the current interactive camera' : normalMethod === 'gaussian' ? 'Camera-facing Gaussian covariance normals at the current interactive camera' : normalMethod === 'hybrid' ? 'Blended Gaussian covariance and depth-derived normals at the current interactive camera' : 'CUS-GS depth-backprojected normal at the current interactive camera';
+        setStatus('CUS-GS 几何图已更新');
+        if (parent !== window) parent.postMessage({ type: '3dgs-geometry-rendered' }, location.origin);
+      } catch (error) {
+        if (requestId !== geometryRequestId || renderMode !== requestedMode) return;
+        geometryOverlay.hidden = true;
+        if (viewer.renderer?.domElement) viewer.renderer.domElement.style.opacity = '1';
+        document.getElementById('render-mode').value = 'color';
+        setRenderMode('color');
+        installRenderModes(viewer);
+        if (parent !== window) parent.postMessage({ type: '3dgs-geometry-error', message: error.message }, location.origin);
+        setStatus(`几何渲染不可用：${error.message}`);
+      } finally {
+        geometryInFlight = false;
+        if (geometryPending && renderMode === 'normal') {
+          geometryPending = false;
+          queueGeometryRender(0);
+        }
+      }
     }
 
     function updateTuning(event) {
@@ -213,12 +402,70 @@
       }
       document.getElementById('depth-near-value').value = Number(near.value).toFixed(2);
       document.getElementById('depth-far-value').value = Number(far.value).toFixed(2);
-      document.getElementById('normal-strength-value').value = document.getElementById('normal-strength').value;
       if (viewer) installRenderModes(viewer);
+      queueGeometryRender(0);
     }
 
     function values(ids) { return ids.map(id => Number(document.getElementById(id).value) || 0); }
     function setStatus(text) { status.textContent = text; debug.textContent = text; }
+    function persistRendererSettings() {
+      localStorage.setItem('gaussian-splatting-renderer-settings', JSON.stringify({
+        shDegree: document.getElementById('sh-degree').value,
+        gpuSort: false,
+        antialias: document.getElementById('antialias').checked,
+        alpha: document.getElementById('alpha').value,
+        geometryResolution: document.getElementById('geometry-resolution').value,
+        geometryFps: document.getElementById('geometry-fps').value,
+        normalContrast: document.getElementById('normal-contrast').value,
+        normalSmoothing: document.getElementById('normal-smoothing').value,
+        normalMethod: document.getElementById('normal-method').value
+      }));
+    }
+    function restoreRendererSettings() {
+      try {
+        const saved = JSON.parse(localStorage.getItem('gaussian-splatting-renderer-settings') || '{}');
+        if ([0, 1, 2].includes(Number(saved.shDegree))) document.getElementById('sh-degree').value = saved.shDegree;
+        document.getElementById('gpu-sort').checked = false;
+        if (typeof saved.antialias === 'boolean') document.getElementById('antialias').checked = saved.antialias;
+        if (Number(saved.alpha) >= 0 && Number(saved.alpha) <= 30) document.getElementById('alpha').value = saved.alpha;
+        if ([256, 384, 512, 640, 768].includes(Number(saved.geometryResolution))) document.getElementById('geometry-resolution').value = saved.geometryResolution;
+        if (Number(saved.geometryFps) >= 5 && Number(saved.geometryFps) <= 20) document.getElementById('geometry-fps').value = saved.geometryFps;
+        if (Number(saved.normalContrast) >= 0.5 && Number(saved.normalContrast) <= 2) document.getElementById('normal-contrast').value = saved.normalContrast;
+        if (Number(saved.normalSmoothing) >= 0 && Number(saved.normalSmoothing) <= 2.5) document.getElementById('normal-smoothing').value = saved.normalSmoothing;
+        if (['depth', 'gaussian', 'hybrid'].includes(saved.normalMethod)) document.getElementById('normal-method').value = saved.normalMethod;
+      } catch { /* Ignore unavailable or invalid local preferences. */ }
+      document.getElementById('geometry-resolution-value').value = `${document.getElementById('geometry-resolution').value} px`;
+      document.getElementById('geometry-fps-value').value = `${document.getElementById('geometry-fps').value} fps`;
+      document.getElementById('normal-contrast-value').value = `${Number(document.getElementById('normal-contrast').value).toFixed(2)}×`;
+      document.getElementById('normal-smoothing-value').value = `${Number(document.getElementById('normal-smoothing').value).toFixed(1)}×`;
+    }
+    function rebuildWithRendererSettings() {
+      persistRendererSettings();
+      if (!viewer) return;
+      const position = viewer.camera.position.toArray();
+      const lookAt = viewer.controls?.target.toArray() || initialLookAt;
+      buildViewer(position, lookAt, Number(document.getElementById('alpha').value));
+    }
+    function applySphericalHarmonicsDegree(activeViewer) {
+      const degree = Number(document.getElementById('sh-degree').value);
+      if (!activeViewer?.setActiveSphericalHarmonicsDegrees) return;
+      activeViewer.setActiveSphericalHarmonicsDegrees(degree);
+      activeViewer.forceRenderNextFrame();
+    }
+    async function disposeViewerInstance(instance) {
+      const parent = container.parentNode;
+      const nextSibling = container.nextSibling;
+      const previousStyle = container.getAttribute('style');
+      container.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;width:1px;height:1px;inset:auto;overflow:hidden';
+      document.body.appendChild(container);
+      try {
+        await instance.dispose();
+      } finally {
+        if (parent) parent.insertBefore(container, nextSibling);
+        if (previousStyle === null) container.removeAttribute('style');
+        else container.setAttribute('style', previousStyle);
+      }
+    }
     function applyCamera(position, lookAt, up = [0, 0, 1]) {
       if (!viewer) return;
       const camera = viewer.camera;
@@ -237,7 +484,7 @@
       const generation = ++viewerGeneration;
       const previousViewer = viewer;
       viewer = undefined;
-      if (previousViewer) await previousViewer.dispose();
+      if (previousViewer) await disposeViewerInstance(previousViewer);
       if (generation !== viewerGeneration) return;
       container.replaceChildren();
       viewer = new GaussianSplats3D.Viewer({
@@ -247,31 +494,92 @@
         initialCameraLookAt: lookAt,
         sharedMemoryForWorkers: false,
         gpuAcceleratedSort: false,
-        sphericalHarmonicsDegree: 0,
-        antialiased: true,
+        sphericalHarmonicsDegree: 2,
+        antialiased: document.getElementById('antialias').checked,
         logLevel: GaussianSplats3D.LogLevel.Warning
       });
       setStatus('正在解码 Gaussian PLY…');
-      viewer.addSplatScene(modelUrl, {
+      const activeViewer = viewer;
+      activeViewer.addSplatScene(modelUrl, {
         splatAlphaRemovalThreshold: alpha,
         showLoadingUI: false,
         progressiveLoad: false
       }).then(() => {
-        installRenderModes(viewer);
-        viewer.start();
+        if (generation !== viewerGeneration || viewer !== activeViewer) return;
+        window.__gaussianViewerReady = true;
+        document.getElementById('offline-preview').hidden = true;
+        document.getElementById('offline-notice').hidden = true;
+        applySphericalHarmonicsDegree(activeViewer);
+        installRenderModes(activeViewer);
+        if (activeViewer.renderer?.domElement) activeViewer.renderer.domElement.style.opacity = renderMode === 'normal' ? '0' : '1';
+        geometryOverlay.hidden = renderMode !== 'normal';
+        activeViewer.start();
+        activeViewer.controls?.addEventListener('start', () => {
+          isInteracting = true;
+          clearTimeout(geometryTimer);
+          geometryPending = false;
+        });
+        activeViewer.controls?.addEventListener('end', () => {
+          isInteracting = false;
+          if (renderMode === 'normal') {
+            queueGeometryRender(0);
+          }
+        });
+        activeViewer.controls?.addEventListener('change', () => {
+          if (renderMode === 'depth') installRenderModes(activeViewer);
+          else queueGeometryRender();
+        });
+        if (window.ResizeObserver) new ResizeObserver(() => queueGeometryRender(100)).observe(container);
+        if (renderMode === 'normal') queueGeometryRender(0);
         setStatus('场景已就绪');
         if (parent !== window) parent.postMessage({ type: '3dgs-viewer-ready' }, location.origin);
       }).catch(error => {
+        if (generation !== viewerGeneration || viewer !== activeViewer) return;
         console.error(error);
         setStatus(`加载失败：${error?.message || '查看浏览器控制台'}`);
       });
     }
 
+    restoreRendererSettings();
     setRenderMode(renderMode);
-    buildViewer(initialPosition, initialLookAt, 1);
+    buildViewer(initialPosition, initialLookAt, Number(document.getElementById('alpha').value));
     document.getElementById('apply-camera').addEventListener('click', () => applyCamera(values(['px','py','pz']), values(['tx','ty','tz'])));
     document.getElementById('render-mode').addEventListener('change', event => setRenderMode(event.target.value));
-    ['depth-near', 'depth-far', 'normal-strength'].forEach(id => document.getElementById(id).addEventListener('input', updateTuning));
+    ['depth-near', 'depth-far'].forEach(id => document.getElementById(id).addEventListener('input', updateTuning));
+    document.getElementById('sh-degree').addEventListener('change', () => {
+      persistRendererSettings();
+      try {
+        applySphericalHarmonicsDegree(viewer);
+      } catch (error) {
+        console.error(error);
+        setStatus(`球谐阶数切换失败：${error?.message || '查看器未就绪'}`);
+      }
+    });
+    document.getElementById('antialias').addEventListener('change', rebuildWithRendererSettings);
+    document.getElementById('geometry-resolution').addEventListener('input', event => {
+      document.getElementById('geometry-resolution-value').value = `${event.target.value} px`;
+      persistRendererSettings();
+      queueGeometryRender(80);
+    });
+    document.getElementById('geometry-fps').addEventListener('input', event => {
+      document.getElementById('geometry-fps-value').value = `${event.target.value} fps`;
+      persistRendererSettings();
+      queueGeometryRender(0);
+    });
+    document.getElementById('normal-contrast').addEventListener('input', event => {
+      document.getElementById('normal-contrast-value').value = `${Number(event.target.value).toFixed(2)}×`;
+      persistRendererSettings();
+      queueGeometryRender(80);
+    });
+    document.getElementById('normal-smoothing').addEventListener('input', event => {
+      document.getElementById('normal-smoothing-value').value = `${Number(event.target.value).toFixed(1)}×`;
+      persistRendererSettings();
+      queueGeometryRender(80);
+    });
+    document.getElementById('normal-method').addEventListener('change', () => {
+      persistRendererSettings();
+      queueGeometryRender(0);
+    });
     window.addEventListener('message', event => {
       if (event.source !== parent || event.origin !== location.origin) return;
       if (event.data?.type === '3dgs-render-mode' && ['color', 'depth', 'normal'].includes(event.data.mode)) {
@@ -279,8 +587,9 @@
         setRenderMode(event.data.mode);
       }
     });
-    document.getElementById('alpha').addEventListener('input', event => { document.getElementById('alpha-value').textContent = event.target.value; });
-    document.getElementById('alpha').addEventListener('change', () => buildViewer(values(['px','py','pz']), values(['tx','ty','tz']), Number(document.getElementById('alpha').value)));
+    document.getElementById('alpha').addEventListener('input', event => { document.getElementById('alpha-value').textContent = `${event.target.value} / 255`; });
+    document.getElementById('alpha').addEventListener('input', persistRendererSettings);
+    document.getElementById('alpha').addEventListener('change', rebuildWithRendererSettings);
     document.getElementById('reset-view').addEventListener('click', () => {
       ['px','py','pz'].forEach((id, i) => document.getElementById(id).value = initialPosition[i]);
       ['tx','ty','tz'].forEach((id, i) => document.getElementById(id).value = initialLookAt[i]);
@@ -347,12 +656,14 @@
       const generation = ++viewerGeneration;
       const previousViewer = viewer;
       viewer = undefined;
-      if (previousViewer) await previousViewer.dispose();
+      if (previousViewer) await disposeViewerInstance(previousViewer);
       if (generation !== viewerGeneration) return;
       container.replaceChildren();
-      viewer = new GaussianSplats3D.Viewer({ rootElement:container, cameraUp:[0,0,1], initialCameraPosition:initialPosition, initialCameraLookAt:initialLookAt, sharedMemoryForWorkers:false, gpuAcceleratedSort:false, sphericalHarmonicsDegree:0, antialiased:true });
+      viewer = new GaussianSplats3D.Viewer({ rootElement:container, cameraUp:[0,0,1], initialCameraPosition:initialPosition, initialCameraLookAt:initialLookAt, sharedMemoryForWorkers:false, gpuAcceleratedSort:false, sphericalHarmonicsDegree:2, antialiased:document.getElementById('antialias').checked });
       setStatus(`载入 ${file.name}…`);
-      viewer.addSplatScene(localUrl, { showLoadingUI:false, progressiveLoad:false }).then(() => { installRenderModes(viewer); viewer.start(); setStatus(`已载入 ${file.name}`); if (parent !== window) parent.postMessage({ type: '3dgs-viewer-ready' }, location.origin); }).catch(error => { console.error(error); setStatus('文件载入失败'); URL.revokeObjectURL(localUrl); });
+      supportsCusGeometry = false;
+      const activeViewer = viewer;
+      activeViewer.addSplatScene(localUrl, { showLoadingUI:false, progressiveLoad:false }).then(() => { if (generation !== viewerGeneration || viewer !== activeViewer) return; applySphericalHarmonicsDegree(activeViewer); installRenderModes(activeViewer); activeViewer.start(); activeViewer.controls?.addEventListener('start', () => { isInteracting = true; clearTimeout(geometryTimer); geometryPending = false; }); activeViewer.controls?.addEventListener('end', () => { isInteracting = false; if (renderMode === 'normal') queueGeometryRender(0); }); activeViewer.controls?.addEventListener('change', () => { if (renderMode === 'depth') installRenderModes(activeViewer); else queueGeometryRender(); }); if (window.ResizeObserver) new ResizeObserver(() => queueGeometryRender(100)).observe(container); setStatus(`已载入 ${file.name}`); if (parent !== window) parent.postMessage({ type: '3dgs-viewer-ready' }, location.origin); }).catch(error => { if (generation !== viewerGeneration || viewer !== activeViewer) return; console.error(error); setStatus('文件载入失败'); URL.revokeObjectURL(localUrl); });
     });
   </script>
 </body>

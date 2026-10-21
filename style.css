@@ -40,6 +40,9 @@ h1 em { color: var(--green); font-style: normal; }
 .authors { display: flex; flex-wrap: wrap; gap: 7px 20px; margin-bottom: 4px; font-size: 12px; font-weight: 600; }
 .affiliation { margin: 0 0 22px; color: var(--muted); font-size: 12px; }
 .hero-links { display: flex; flex-wrap: wrap; gap: 9px; }
+.demo-picker { display: inline-flex; align-items: center; gap: 10px; margin-top: 20px; color: #637169; font: 10px var(--mono); text-transform: uppercase; }
+.demo-picker select { min-width: 235px; max-width: 100%; height: 36px; padding: 0 30px 0 10px; border: 1px solid #cbd8ce; border-radius: 3px; color: var(--ink); background: #fbfcfb; font: 11px var(--sans); text-transform: none; }
+.demo-picker select:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .pill-link { display: inline-flex; gap: 14px; align-items: center; min-height: 38px; padding: 0 14px; border: 1px solid #cdd9d1; border-radius: 3px; color: #3b4b44; text-decoration: none; font-size: 12px; font-weight: 600; }
 .pill-link span { color: var(--green); }
 .pill-link:hover { border-color: var(--green); }
@@ -112,6 +115,7 @@ h2 { margin: 0; font: 700 31px/1.18 var(--display); letter-spacing: 0; }
 #viewer { position: relative; min-height: 530px; overflow: hidden; border: 1px solid #283b31; background: #18261f; color: #eff7ef; }
 .viewer-section #viewer { height: 650px; min-height: 0; }
 #viewer iframe { display: block; width: 100%; height: 100%; border: 0; }
+.viewer-render-status { min-height: 18px; margin: 8px 0 0; color: #718079; font-size: 10px; }
 .viewer-empty { display: flex; min-height: 488px; flex-direction: column; align-items: center; justify-content: center; padding: 28px; text-align: center; background: radial-gradient(ellipse at 50% 53%, #284c3c 0, #20382d 33%, #18261f 73%); }
 .viewer-empty .eyebrow { margin: 12px 0 5px; color: #bde5c4; }
 .viewer-empty h3 { margin: 0 0 5px; font: 600 21px var(--display); }
@@ -213,6 +217,8 @@ td:not(:first-child) { font-variant-numeric: tabular-nums; }
   .hero { padding-block: 43px 40px; }
   h1 { font-size: 39px; }
   .hero-deck { font-size: 15px; }
+  .demo-picker { width: 100%; align-items: flex-start; flex-direction: column; gap: 6px; }
+  .demo-picker select { width: 100%; }
   .hero-art { min-height: 275px; }
   .metric-grid { width: 100%; grid-template-columns: repeat(3, 1fr); padding-inline: 12px; }
   .metric { padding-inline: 7px; }

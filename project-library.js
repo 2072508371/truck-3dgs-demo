@@ -7,6 +7,15 @@ const readiness = document.getElementById('train-readiness');
 const viewerFrame = document.querySelector('#viewer iframe');
 const isLocalApp = ['localhost', '127.0.0.1'].includes(location.hostname);
 let selectedRenderMode = 'color';
+const renderStatus = document.getElementById('viewer-render-status');
+const demoSelect = document.getElementById('demo-select');
+const builtinDemos = [
+  { id: 'chair-3000', name: 'Chair · 3,000 iterations', displayName: 'Chair Scene', scene: 'Synthetic NeRF Chair', iterations: 3000, image_count: 100, gaussian_count: 142302, model_size: '35.3 MB', model_url: 'assets/demos/chair-3000.ply', render_url: 'assets/demos/chair-3000.png', reference_url: 'assets/demos/chair-reference.png', view_label: 'TRAIN VIEW 000', description: 'A locally trained reconstruction from the distinct Synthetic NeRF Chair multi-view dataset. This demo uses 100 posed training views and its own Gaussian model.' },
+  { id: 'drums-3000', name: 'Drums · 3,000 iterations', displayName: 'Drums Scene', scene: 'Synthetic NeRF Drums', iterations: 3000, image_count: 100, gaussian_count: 113725, model_size: '28.2 MB', model_url: 'assets/demos/drums-3000.ply', render_url: 'assets/demos/drums-3000.png', reference_url: 'assets/demos/drums-reference.png', view_label: 'TRAIN VIEW 000', description: 'A locally trained reconstruction from the distinct Synthetic NeRF Drums multi-view dataset. This demo uses 100 posed training views and its own Gaussian model.' },
+  { id: 'lego-3000', name: 'Lego · 3,000 iterations', displayName: 'Lego Scene', scene: 'Synthetic NeRF Lego', iterations: 3000, image_count: 136, gaussian_count: 134826, model_size: '33.4 MB', model_url: 'assets/lego_3000_3dgs.ply', render_url: 'assets/lego-render.png', reference_url: 'assets/lego-gt.png', view_label: 'TRAIN VIEW 035', description: 'A locally trained reconstruction from the Synthetic NeRF Lego multi-view dataset. The viewer loads the trained Gaussian PLY and supports orbit, pan, zoom, depth, and live CUS-GS normals.' }
+];
+let demoPickerBound = false;
+let pickerProjects = [];
 let selectedPhotos = [];
 let acceptedPhotos = [];
 let serverStatus;
@@ -30,12 +39,19 @@ function setRenderMode(mode) {
 window.addEventListener('message', event => {
   if (event.origin !== location.origin || event.source !== viewerFrame.contentWindow) return;
   if (event.data?.type === '3dgs-viewer-ready') setRenderMode(selectedRenderMode);
+  if (event.data?.type === '3dgs-geometry-progress') renderStatus.textContent = '正在按当前相机重新计算 CUS-GS 几何图…';
+  if (event.data?.type === '3dgs-geometry-rendered') renderStatus.textContent = 'CUS-GS CUDA 几何图已同步到当前相机';
+  if (event.data?.type === '3dgs-geometry-error') {
+    renderStatus.textContent = `实时深度/法向不可用：${event.data.message}`;
+    setRenderMode('color');
+  }
 });
 
 document.querySelectorAll('[data-render-mode]').forEach(button => {
   button.addEventListener('click', () => setRenderMode(button.dataset.renderMode));
 });
 if (!isLocalApp) document.getElementById('open-library').hidden = true;
+if (!isLocalApp) document.querySelector('[data-render-mode="normal"]').hidden = true;
 
 function qualityOf(file) {
   return new Promise(resolve => {
@@ -102,8 +118,13 @@ function renderProjectCard(project) {
   card.append(details);
   if (project.status === 'demo_ready') {
     const open = document.createElement('button');
-    open.type = 'button'; open.textContent = '打开 Demo';
-    open.addEventListener('click', () => { window.location.href = project.is_builtin ? '/' : `/?project=${encodeURIComponent(project.id)}`; });
+    open.type = 'button'; open.textContent = project.is_builtin ? '切换到此 Demo' : '打开 Demo';
+    open.addEventListener('click', () => {
+      if (project.is_builtin) selectDemo(project.id);
+      else selectProject(project);
+      dialog.close();
+      document.getElementById('viewer-section').scrollIntoView({ behavior: 'smooth' });
+    });
     card.append(open);
   } else if (project.image_count >= 20 && ['photos_ready', 'failed'].includes(project.status)) {
     const train = document.createElement('button');
@@ -125,6 +146,7 @@ function renderProjectCard(project) {
 async function refreshProjects() {
   try {
     const projects = await api('/api/projects');
+    configureDemoPicker(projects);
     projectList.replaceChildren(...projects.map(renderProjectCard));
   } catch {
     projectList.innerHTML = '<p class="library-muted">本地项目服务未连接。请用 start_project_app.bat 启动项目库。</p>';
@@ -187,34 +209,130 @@ createButton.addEventListener('click', async () => {
   }
 });
 
-async function openGeneratedProject() {
-  const projectId = new URLSearchParams(location.search).get('project');
-  if (!projectId || projectId === 'lego-3000') return;
-  try {
-    const project = await api(`/api/projects/${encodeURIComponent(projectId)}/status`);
-    if (project.status !== 'demo_ready') return;
-    document.title = `${project.name} | 3D Gaussian Splatting`;
-    document.querySelector('h1').innerHTML = `Reconstructing<br><em>${project.name.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])}</em> with 3D Gaussian Splatting`;
-    document.querySelector('.hero-deck').textContent = 'A locally trained 3D Gaussian Splatting scene reconstructed from your photos.';
-    document.querySelector('.hero-art img').src = project.render_url || 'assets/lego-render.png';
-    document.querySelector('.hero-art img').alt = `${project.name} 3DGS render`;
-    document.querySelector('.coord-a').textContent = `${project.image_count} INPUT PHOTOS`;
-    document.querySelector('.coord-b').textContent = 'TRAINED GAUSSIAN FIELD';
-    document.querySelector('.art-caption span:first-child').textContent = 'GENERATED DEMO';
-    document.querySelector('.art-caption span:last-child').textContent = 'LOCAL GPU TRAINING';
-    const scores = project.metrics || {};
-    document.querySelector('.metric-grid').innerHTML = `<div class="metric"><strong>${Number(project.iterations || 30000).toLocaleString()}</strong><span>TRAINING ITERATIONS</span></div><div class="metric"><strong>${project.image_count}</strong><span>INPUT PHOTOS</span></div><div class="metric"><strong>${scores.PSNR ? Number(scores.PSNR).toFixed(2) : 'Ready'}</strong><span>${scores.PSNR ? 'TEST PSNR · dB' : 'MODEL STATUS'}</span></div>`;
-    document.querySelector('.overview-copy .lead').textContent = `A custom 3D Gaussian Splatting reconstruction of ${project.name}, generated from ${project.image_count} uploaded photos.`;
-    document.querySelectorAll('.overview-copy p')[2].textContent = `The model was trained locally for ${Number(project.iterations || 30000).toLocaleString()} iterations. Camera poses were estimated from the uploaded overlapping views with COLMAP.`;
-    viewerFrame.src = `viewer/index.html?embedded=1&model=${encodeURIComponent(project.model_url)}&name=${encodeURIComponent(project.name)}`;
-    if (project.reference_url) document.querySelector('.result-image').src = project.reference_url;
-    if (project.render_url) document.querySelectorAll('.result-image')[1].src = project.render_url;
-    document.querySelector('.asset-note').textContent = 'Generated locally from this project’s photos. Metrics are produced by the 3DGS evaluation script when available.';
-    document.querySelector('.metric-table-wrap tbody').innerHTML = `<tr><td>${project.name}</td><td>Test split</td><td>${Number(project.iterations || 30000).toLocaleString()}</td><td>${project.gaussian_count || '—'}</td><td>Gaussian PLY</td></tr>`;
-  } catch { /* A missing local project leaves the bundled example visible. */ }
+function number(value) { return Number(value || 0).toLocaleString(); }
+
+function configureDemoPicker(projects = []) {
+  pickerProjects = projects;
+  for (const demo of builtinDemos) {
+    const saved = projects.find(project => project.id === demo.id && project.is_builtin);
+    if (saved) Object.assign(demo, {
+      gaussian_count: saved.gaussian_count || demo.gaussian_count,
+      model_size: saved.model_size || demo.model_size,
+      image_count: saved.image_count || demo.image_count,
+      model_url: saved.model_url?.replace(/^\/assets\//, 'assets/') || demo.model_url,
+      render_url: saved.render_url || demo.render_url,
+      reference_url: saved.reference_url || demo.reference_url,
+      view_label: saved.view_label || demo.view_label
+    });
+  }
+  const current = demoSelect.value;
+  const options = [...builtinDemos, ...projects.filter(project => project.status === 'demo_ready' && !project.is_builtin)];
+  demoSelect.replaceChildren(...options.map(project => new Option(project.name, project.id)));
+  if (!demoPickerBound) {
+    demoSelect.addEventListener('change', () => {
+      if (builtinDemos.some(item => item.id === demoSelect.value)) selectDemo(demoSelect.value);
+      else {
+        const project = pickerProjects.find(item => item.id === demoSelect.value);
+        if (project) selectProject(project);
+      }
+    });
+    demoPickerBound = true;
+  }
+  if ([...demoSelect.options].some(option => option.value === current)) demoSelect.value = current;
+}
+
+function applyDemo(demo, isUploaded = false) {
+  const iterations = Number(demo.iterations || 30000);
+  const name = demo.name || 'Untitled scene';
+  const modelUrl = new URL(demo.model_url, location.href).href;
+  const renderUrl = demo.render_url || demo.reference_url || 'assets/lego-render.png';
+  const referenceUrl = demo.reference_url || renderUrl;
+  const points = Number(demo.gaussian_count || 0);
+  const size = demo.model_size || 'Gaussian PLY';
+  const escaped = name.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+  document.title = `${name} | 3D Gaussian Splatting`;
+  document.querySelector('meta[name="description"]').content = `${name}: an interactive 3D Gaussian Splatting reconstruction, with scene-specific training information and renders.`;
+  document.querySelector('h1').innerHTML = `Reconstructing the<br><em>${demo.displayName || escaped}</em> with 3D Gaussian Splatting`;
+  document.querySelector('.hero-copy > .eyebrow').innerHTML = `<span class="live-dot"></span>${isUploaded ? 'LOCAL PHOTO RECONSTRUCTION' : 'SYNTHETIC NERF · NOVEL VIEW SYNTHESIS'}`;
+  document.querySelector('.hero-deck').textContent = demo.description || `A locally trained 3D Gaussian Splatting reconstruction of ${name}.`;
+  const heroImage = document.querySelector('.hero-art img');
+  heroImage.src = renderUrl;
+  heroImage.alt = `${name} 3DGS training render`;
+  document.querySelector('.coord-a').textContent = isUploaded ? `${demo.image_count || 0} INPUT PHOTOS` : `${demo.image_count || 136} TRAIN VIEWS`;
+  document.querySelector('.coord-b').textContent = `GAUSSIAN FIELD /// ${iterations >= 1000 ? `${iterations / 1000}K` : iterations}`;
+  document.querySelector('.art-caption span:first-child').textContent = isUploaded ? 'GENERATED DEMO' : 'REAL TRAINING RENDER';
+  document.querySelector('.art-caption span:last-child').textContent = points ? `${number(points)} GAUSSIANS` : 'GAUSSIAN PLY';
+  document.querySelector('.metric-grid').innerHTML = `<div class="metric"><strong>${number(iterations)}</strong><span>TRAINING ITERATIONS</span></div><div class="metric"><strong>${points ? number(points) : '—'}</strong><span>GAUSSIAN POINTS</span></div><div class="metric"><strong>${size}</strong><span>PLY MODEL SIZE</span></div>`;
+  document.getElementById('overview-title').textContent = `From posed ${demo.scene || name} views to a navigable scene`;
+  document.querySelector('.overview-copy .lead').textContent = isUploaded
+    ? `A custom 3D Gaussian Splatting reconstruction of ${name}, generated from ${demo.image_count || 0} uploaded photos.`
+    : `${demo.description || `A 3D Gaussian Splatting reconstruction of ${name}.`} This page is showing the selected checkpoint.`;
+  document.querySelectorAll('.overview-copy p')[2].textContent = isUploaded
+    ? `The model was trained locally for ${number(iterations)} iterations. Camera poses were estimated from the uploaded overlapping views with COLMAP.`
+    : `This saved model contains ${points ? number(points) : 'an unreported number of'} Gaussians after ${number(iterations)} iterations. The viewer, render images, and metrics on this page all refer to this selected checkpoint.`;
+  document.getElementById('viewer-scene-name').textContent = name;
+  document.querySelector('.wordmark').setAttribute('aria-label', `${name} project home`);
+  document.getElementById('footer-scene-name').textContent = `${name.toLocaleUpperCase()} · 3D GAUSSIAN SPLATTING`;
+  document.querySelector('#viewer iframe').title = `Interactive ${name} Gaussian Splatting viewer`;
+  const previewUrl = new URL(renderUrl, location.href);
+  const params = new URLSearchParams({ embedded: '1', model: modelUrl, name, demoId: demo.id || '', iterations: String(iterations), preview: previewUrl.pathname, v: `demo-${demo.id || 'custom'}-${Date.now()}` });
+  viewerFrame.src = `viewer/index.html?${params}`;
+  const resultImages = document.querySelectorAll('.result-image');
+  resultImages[0].src = referenceUrl;
+  resultImages[0].alt = `${name} reference image`;
+  resultImages[1].src = renderUrl;
+  resultImages[1].alt = `${name} Gaussian Splatting rendering`;
+  document.querySelector('.result-frame:first-child figcaption span').textContent = isUploaded ? 'INPUT PHOTO' : `GROUND TRUTH · ${demo.view_label || 'TRAIN VIEW'}`;
+  document.querySelector('.result-frame:first-child figcaption code').textContent = referenceUrl.split('/').pop();
+  document.querySelector('.result-frame:last-child figcaption span').textContent = `3DGS RENDER · ${demo.view_label || 'SELECTED VIEW'}`;
+  document.querySelector('.result-frame:last-child figcaption code').textContent = renderUrl.split('/').pop();
+  document.getElementById('result-view-label').innerHTML = `${demo.view_label || 'TRAIN VIEW'} <b>·</b> ${number(iterations)} ITERATIONS`;
+  document.querySelector('.asset-note').textContent = isUploaded
+    ? 'Generated locally from this project’s photos. Metrics are produced by the 3DGS evaluation script when available.'
+    : `Both images show the selected ${number(iterations)}-iteration checkpoint and its matching training view. This is a training-view comparison, not a held-out benchmark.`;
+  document.querySelector('.metric-table-wrap tbody').innerHTML = `<tr><td>${escaped}</td><td>${isUploaded ? 'Uploaded photos' : demo.view_label || 'Training view'}</td><td>${number(iterations)}</td><td>${points ? number(points) : '—'}</td><td>${size}</td></tr>`;
+  if (![...demoSelect.options].some(option => option.value === demo.id)) demoSelect.add(new Option(name, demo.id));
+  demoSelect.value = demo.id;
+}
+
+function selectDemo(demoId) {
+  const demo = builtinDemos.find(item => item.id === demoId);
+  if (!demo) return;
+  applyDemo(demo);
+  const url = new URL(location.href);
+  url.searchParams.set('demo', demo.id);
+  url.searchParams.delete('project');
+  history.replaceState({}, '', url);
+  refreshProjects();
+}
+
+function selectProject(project) {
+  applyDemo(project, true);
+  const url = new URL(location.href);
+  url.searchParams.set('project', project.id);
+  url.searchParams.delete('demo');
+  history.replaceState({}, '', url);
+}
+
+async function loadSelectedDemo() {
+  const params = new URLSearchParams(location.search);
+  const projectId = params.get('project');
+  if (projectId) {
+    try {
+      const project = await api(`/api/projects/${encodeURIComponent(projectId)}/status`);
+      if (project.status === 'demo_ready') selectProject(project);
+      return;
+    } catch { return; }
+  }
+  const requested = params.get('demo') || 'chair-3000';
+  selectDemo(builtinDemos.some(item => item.id === requested) ? requested : 'chair-3000');
 }
 
 if (isLocalApp) {
-  openGeneratedProject();
+  configureDemoPicker();
+  loadSelectedDemo();
   setInterval(() => { if (dialog.open) refreshProjects(); }, 3000);
+} else {
+  configureDemoPicker();
+  loadSelectedDemo();
 }

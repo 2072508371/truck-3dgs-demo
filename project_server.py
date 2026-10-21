@@ -52,10 +52,27 @@ def write_project(project: dict) -> None:
 
 
 def project_list() -> list[dict]:
-    items = [{
-        "id": "lego-3000", "name": "Lego · 3,000 iterations", "status": "demo_ready",
-        "image_count": 136, "updated_at": "Built-in demo", "is_builtin": True,
-    }]
+    items = []
+    builtins = [
+        ("chair-3000", "Chair · 3,000 iterations", 3000, "assets/demos/chair-3000.ply", "assets/demos/chair-3000.png", "assets/demos/chair-reference.png", 100),
+        ("drums-3000", "Drums · 3,000 iterations", 3000, "assets/demos/drums-3000.ply", "assets/demos/drums-3000.png", "assets/demos/drums-reference.png", 100),
+        ("lego-3000", "Lego · 3,000 iterations", 3000, "assets/lego_3000_3dgs.ply", "assets/lego-render.png", "assets/lego-gt.png", 136),
+    ]
+    for project_id, name, iterations, model_rel, render_rel, reference_rel, image_count in builtins:
+        model_file = PAGE_DIR / model_rel
+        gaussian_count = 0
+        if model_file.is_file():
+            with model_file.open("rb") as stream:
+                header = stream.read(4096).split(b"end_header", 1)[0].decode("ascii", errors="ignore")
+            count = re.search(r"element vertex (\d+)", header)
+            gaussian_count = int(count.group(1)) if count else 0
+        items.append({
+            "id": project_id, "name": name, "status": "demo_ready", "iterations": iterations,
+            "image_count": image_count, "gaussian_count": gaussian_count,
+            "model_url": f"/{model_rel}", "render_url": render_rel,
+            "reference_url": reference_rel, "model_size": f"{model_file.stat().st_size / 1_000_000:.1f} MB" if model_file.is_file() else "—",
+            "view_label": "TRAIN VIEW 035" if project_id == "lego-3000" else "TRAIN VIEW 000", "updated_at": "Built-in scene demo", "is_builtin": True,
+        })
     if PROJECTS_DIR.exists():
         for folder in PROJECTS_DIR.iterdir():
             if folder.is_dir():
@@ -182,6 +199,16 @@ class Handler(SimpleHTTPRequestHandler):
                 "iterations": TRAIN_ITERATIONS,
             })
             return
+        if parsed.path == "/api/geometry/status":
+            try:
+                import cus_geometry  # noqa: F401
+                available = True
+                message = "CUS-GS CUDA renderer is available."
+            except Exception as error:
+                available = False
+                message = str(error)
+            self.send_json(200, {"available": available, "message": message})
+            return
         if parsed.path == "/api/projects":
             self.send_json(200, project_list())
             return
@@ -209,6 +236,24 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/api/geometry/render":
+            try:
+                import cus_geometry
+                payload = self.body_json()
+                image = cus_geometry.render(payload)
+            except (ValueError, json.JSONDecodeError) as error:
+                self.send_json(400, {"error": str(error)})
+                return
+            except Exception as error:
+                self.send_json(503, {"error": str(error)})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(image)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(image)
+            return
         if parsed.path == "/api/projects":
             try:
                 payload = self.body_json()
