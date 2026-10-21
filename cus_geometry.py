@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from PIL import Image
 from plyfile import PlyData
 
@@ -125,6 +126,64 @@ def _edge_aware_smooth_normals(
     return np.where(valid[..., None], smoothed, 0.0)
 
 
+def _depth_normals(
+    depth: torch.Tensor, alpha: torch.Tensor, view: torch.Tensor, fovx: float, fovy: float
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Backproject a robust depth surface and fuse camera-facing normals at three scales."""
+    height, width = depth.shape
+    valid = (alpha > 0.12) & (depth > 0) & torch.isfinite(depth)
+    depth = torch.where(valid, depth, 0.0)
+    padded_depth = F.pad(depth[None, None], (1, 1, 1, 1), mode="replicate")[0, 0]
+    padded_valid = F.pad(valid[None, None], (1, 1, 1, 1))[0, 0]
+    neighbors = torch.stack([
+        padded_depth[dy:dy + height, dx:dx + width]
+        for dy in range(3) for dx in range(3)
+    ])
+    neighbor_valid = torch.stack([
+        padded_valid[dy:dy + height, dx:dx + width]
+        for dy in range(3) for dx in range(3)
+    ])
+    filtered = torch.where(neighbor_valid, neighbors, depth).median(dim=0).values
+
+    y, x = torch.meshgrid(
+        torch.arange(height, device=depth.device, dtype=depth.dtype),
+        torch.arange(width, device=depth.device, dtype=depth.dtype),
+        indexing="ij",
+    )
+    fx = width / (2.0 * math.tan(fovx / 2.0))
+    fy = height / (2.0 * math.tan(fovy / 2.0))
+    points = torch.stack(((x - width / 2.0) * filtered / fx,
+                          (y - height / 2.0) * filtered / fy, filtered), dim=-1)
+    ray = F.normalize(points, dim=-1, eps=1e-6)
+    fused = torch.zeros_like(points)
+    total_weight = torch.zeros_like(depth)
+
+    for step, weight in ((1, 0.5), (2, 0.3), (4, 0.2)):
+        if 2 * step >= min(width, height):
+            continue
+        center = (slice(step, -step), slice(step, -step))
+        left = (slice(step, -step), slice(None, -2 * step))
+        right = (slice(step, -step), slice(2 * step, None))
+        up = (slice(None, -2 * step), slice(step, -step))
+        down = (slice(2 * step, None), slice(step, -step))
+        local_depth = filtered[center]
+        threshold = 0.02 + local_depth * (0.035 * step)
+        trusted = valid[center]
+        for neighbor in (left, right, up, down):
+            trusted = trusted & valid[neighbor] & ((filtered[neighbor] - local_depth).abs() < threshold)
+        horizontal = points[right] - points[left]
+        vertical = points[down] - points[up]
+        normal = F.normalize(torch.cross(horizontal, vertical, dim=-1), dim=-1, eps=1e-6)
+        normal = torch.where((normal * ray[center]).sum(dim=-1, keepdim=True) > 0, -normal, normal)
+        trusted = trusted & (torch.linalg.vector_norm(torch.cross(horizontal, vertical, dim=-1), dim=-1) > 1e-8)
+        fused[center] += normal * (trusted.float() * weight)[..., None]
+        total_weight[center] += trusted.float() * weight
+
+    camera_normal = F.normalize(fused, dim=-1, eps=1e-6)
+    world_normal = camera_normal @ view[:3, :3].T
+    return world_normal.permute(2, 0, 1), total_weight > 0
+
+
 def render(payload: dict) -> bytes:
     width = max(128, min(768, int(payload.get("width", 640))))
     height = max(128, min(768, int(payload.get("height", 480))))
@@ -140,7 +199,7 @@ def render(payload: dict) -> bytes:
     normal_contrast = max(0.25, min(2.0, float(payload.get("normalContrast", 1.0))))
     normal_smoothing = max(0.0, min(2.5, float(payload.get("normalSmoothing", 1.2))))
     mode = payload.get("mode")
-    normal_method = payload.get("normalMethod", "hybrid")
+    normal_method = payload.get("normalMethod", "depth")
     if mode not in {"depth", "normal"}:
         raise ValueError("Mode must be depth or normal.")
     if normal_method not in {"depth", "gaussian", "hybrid"}:
@@ -210,21 +269,24 @@ def render(payload: dict) -> bytes:
             depth_np = depth.cpu().numpy()
             alpha_np = alpha.cpu().numpy()
             valid = (alpha_np > 0.12) & (depth_np > 0)
+            depth_normal_t, trusted_t = _depth_normals(depth, alpha, view, fovx, fovy)
+            trusted = trusted_t.cpu().numpy()
             if normal_method in {"gaussian", "hybrid"}:
                 alpha_safe = alpha.clamp(min=1e-6).unsqueeze(0)
                 bg_contribution = (1.0 - alpha).unsqueeze(0) * 0.5
                 gaussian_normal_t = ((rendered - bg_contribution) / alpha_safe) * 2.0 - 1.0
                 gaussian_normal_t = torch.nn.functional.normalize(gaussian_normal_t, dim=0, eps=1e-6)
                 if normal_method == "hybrid":
-                    depth_normal_t = torch.nn.functional.normalize(normal, dim=0, eps=1e-6)
-                    normal_t = torch.nn.functional.normalize(0.6 * gaussian_normal_t + 0.4 * depth_normal_t, dim=0, eps=1e-6)
+                    normal_t = torch.nn.functional.normalize(0.85 * depth_normal_t + 0.15 * gaussian_normal_t, dim=0, eps=1e-6)
+                    normal_t = torch.where(trusted_t.unsqueeze(0), normal_t, gaussian_normal_t)
                 else:
                     normal_t = gaussian_normal_t
                 normal_np = normal_t.permute(1, 2, 0).cpu().numpy()
             else:
-                normal_np = normal.permute(1, 2, 0).cpu().numpy()
-                normal_np /= np.maximum(np.linalg.norm(normal_np, axis=2, keepdims=True), 1e-6)
-            normal_np = _edge_aware_smooth_normals(normal_np, depth_np, alpha_np, normal_smoothing)
+                normal_np = depth_normal_t.permute(1, 2, 0).cpu().numpy()
+                valid &= trusted
+            smooth_alpha = alpha_np if normal_method != "depth" else np.where(trusted, alpha_np, 0.0)
+            normal_np = _edge_aware_smooth_normals(normal_np, depth_np, smooth_alpha, normal_smoothing)
             rgb = np.clip((normal_np * normal_contrast + 1.0) * 0.5, 0.0, 1.0)
             rgb[~valid] = 0.0
 

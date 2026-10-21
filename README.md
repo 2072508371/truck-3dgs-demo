@@ -39,6 +39,8 @@ GitHub Pages and `start_preview.bat` only serve static files; neither can perfor
 
 Depth and normal modes send the current interactive camera matrix and selected checkpoint ID to the local API. The CUS-GS CUDA rasterizer loads the matching bundled checkpoint, computes ray-ellipsoid depth and multi-scale normals backprojected from that depth, then the viewer overlays the returned frame. Camera orbit, pan, and zoom continue to work; a new frame is rendered after camera movement settles. A user-selected external PLY remains viewable in color mode but is not passed to the geometry endpoint.
 
+The recommended local normal mode follows the UniGS depth-to-normal idea: it backprojects rendered depth, computes camera-facing normals at multiple pixel steps, rejects low-opacity/depth-discontinuity neighborhoods, and fuses trusted estimates before edge-aware smoothing. The optional hybrid and Gaussian-axis modes remain available for comparison. These are rendering improvements for existing RGB-trained checkpoints, not a substitute for UniGS depth/normal-supervised training; 3,000-iteration models can still have noisy or incomplete geometry.
+
 ## Sharing with classmates
 
 Zip the entire `truck_project_page` folder, including `assets/` and `viewer/`. For a quick color-only demo they only need Python 3 and `start_preview.bat`. For live CUS-GS depth/normals they need the CUDA/PyTorch environment, the compiled CUS-GS rasterizer, and `start_project_app.bat`. For photo upload/reconstruction they must also install and configure the full training stack listed above. Do not share private photos or credentials in the archive.

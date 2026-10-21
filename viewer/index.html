@@ -138,13 +138,13 @@
             <input id="geometry-fps" type="range" min="5" max="20" step="1" value="12">
           </div>
           <div class="tuning-control" id="normal-contrast-control" hidden>
-            <label class="tuning-label" for="normal-contrast"><span>法向对比度</span><output id="normal-contrast-value">1.80×</output></label>
-            <input id="normal-contrast" type="range" min="0.5" max="2" step="0.05" value="1.8">
+            <label class="tuning-label" for="normal-contrast"><span>法向对比度</span><output id="normal-contrast-value">1.00×</output></label>
+            <input id="normal-contrast" type="range" min="0.5" max="2" step="0.05" value="1">
           </div>
           <div class="field" id="normal-method-control" hidden>
             <div class="label-row"><label for="normal-method">法向来源</label></div>
-            <select class="mode-select" id="normal-method"><option value="hybrid">融合表面法向（推荐）</option><option value="depth">CUS-GS 深度反投影</option><option value="gaussian">Gaussian 短轴表面估计</option></select>
-            <div class="mode-note">融合稳定的高斯短轴方向与深度几何细节；也可单独查看两种来源。</div>
+            <select class="mode-select" id="normal-method"><option value="depth">多尺度深度法向（推荐）</option><option value="hybrid">深度与高斯融合</option><option value="gaussian">Gaussian 短轴表面估计</option></select>
+            <div class="mode-note">从渲染深度反投影并融合多个差分尺度；在深度断层和低透明度区域抑制错误法向。</div>
           </div>
           <div class="tuning-control" id="normal-smoothing-control" hidden>
             <label class="tuning-label" for="normal-smoothing"><span>法向边缘保留平滑</span><output id="normal-smoothing-value">1.2×</output></label>
