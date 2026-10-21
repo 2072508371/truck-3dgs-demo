@@ -168,7 +168,10 @@
     const preview = document.getElementById('offline-preview');
     const offlineNotice = document.getElementById('offline-notice');
     const previewUrl = bootParams.get('preview');
-    if (previewUrl && new URL(previewUrl, location.href).origin === location.origin) preview.src = previewUrl;
+    if (previewUrl && new URL(previewUrl, location.href).origin === location.origin) {
+      preview.src = previewUrl;
+      preview.hidden = false;
+    }
     if (bootParams.get('name')) document.querySelector('.scene-title h1').textContent = bootParams.get('name');
     if (bootParams.get('iterations')) document.getElementById('viewer-iterations').textContent = Number(bootParams.get('iterations')).toLocaleString();
     if (bootParams.get('demoId')?.endsWith('-3000') || bootParams.get('demoId')?.startsWith('lego-')) document.querySelector('.head-right .hint-top').textContent = `Synthetic NeRF · ${Number(bootParams.get('iterations') || 3000).toLocaleString()} iterations`;
@@ -182,7 +185,7 @@
     window.addEventListener('error', event => {
       if (event.target?.tagName === 'SCRIPT' && event.target.type === 'module') showOfflinePreview();
     }, true);
-    window.setTimeout(() => { if (!window.__gaussianViewerReady) showOfflinePreview(); }, 12000);
+    window.setTimeout(() => { if (!window.__gaussianViewerReady) showOfflinePreview(); }, 120000);
   </script>
   <script type="module">
     import * as GaussianSplats3D from 'https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.7/build/gaussian-splats-3d.module.js';
@@ -536,6 +539,7 @@
       }).catch(error => {
         if (generation !== viewerGeneration || viewer !== activeViewer) return;
         console.error(error);
+        showOfflinePreview();
         setStatus(`加载失败：${error?.message || '查看浏览器控制台'}`);
       });
     }
