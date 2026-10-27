@@ -35,6 +35,9 @@ function setRenderMode(mode) {
   document.querySelectorAll('[data-render-mode]').forEach(button => {
     button.setAttribute('aria-pressed', String(button.dataset.renderMode === mode));
   });
+  renderStatus.textContent = mode === 'normal'
+    ? (isLocalApp ? '正在计算本机 CUS-GS 法向图…' : '浏览器 GPU 近似法向图；可随相机实时转动')
+    : mode === 'depth' ? '浏览器 GPU 实时深度图' : '交互彩色渲染';
   viewerFrame.contentWindow?.postMessage({ type: '3dgs-render-mode', mode }, location.origin);
 }
 
@@ -44,8 +47,13 @@ window.addEventListener('message', event => {
   if (event.data?.type === '3dgs-geometry-progress') renderStatus.textContent = '正在按当前相机重新计算 CUS-GS 几何图…';
   if (event.data?.type === '3dgs-geometry-rendered') renderStatus.textContent = 'CUS-GS CUDA 几何图已同步到当前相机';
   if (event.data?.type === '3dgs-geometry-error') {
-    renderStatus.textContent = `实时深度/法向不可用：${event.data.message}`;
     setRenderMode('color');
+    renderStatus.textContent = `实时深度/法向不可用：${event.data.message}`;
+  }
+  if (event.data?.type === '3dgs-normal-source' && selectedRenderMode === 'normal') {
+    renderStatus.textContent = event.data.source === 'browser'
+      ? '浏览器 GPU 近似法向图；可随相机实时转动'
+      : '正在计算本机 CUS-GS 法向图…';
   }
 });
 
@@ -53,7 +61,7 @@ document.querySelectorAll('[data-render-mode]').forEach(button => {
   button.addEventListener('click', () => setRenderMode(button.dataset.renderMode));
 });
 if (!isLocalApp) document.getElementById('open-library').hidden = true;
-if (!isLocalApp) document.querySelector('[data-render-mode="normal"]').hidden = true;
+if (!isLocalApp) renderStatus.textContent = '公开页面支持浏览器 GPU 法向估计；本机 CUDA 法向需要本地服务';
 
 function qualityOf(file) {
   return new Promise(resolve => {

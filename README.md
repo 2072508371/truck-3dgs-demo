@@ -8,7 +8,7 @@ An interactive project page for viewing trained 3D Gaussian Splatting scenes. Th
 2. Double-click `start_preview.bat`.
 3. Open <http://127.0.0.1:8766/> if the browser did not open automatically.
 
-This serves the static page and built-in scene color viewers. It does not run the CUDA geometry API, training, or save uploaded projects. Keep the console window open while previewing; press Ctrl+C to stop.
+This serves the static page and built-in scene color, browser GPU depth, and approximate browser GPU normal viewers. It does not run the CUDA geometry API, training, or save uploaded projects. Keep the console window open while previewing; press Ctrl+C to stop.
 
 ## Local project library and reconstruction
 
@@ -38,20 +38,20 @@ GitHub Pages and `start_preview.bat` only serve static files; neither can perfor
 - `start_preview.bat`: static preview server.
 - `start_project_app.bat`: local API server and browser launch.
 
-Depth and normal modes send the current interactive camera matrix and selected checkpoint ID to the local API. The CUS-GS CUDA rasterizer loads the matching bundled checkpoint, computes ray-ellipsoid depth and multi-scale normals backprojected from that depth, then the viewer overlays the returned frame. Camera orbit, pan, and zoom continue to work; a new frame is rendered after camera movement settles. A user-selected external PLY remains viewable in color mode but is not passed to the geometry endpoint.
+The browser draws color, depth, and approximate Gaussian covariance normals directly with WebGL, so these modes follow camera orbit, pan, and zoom on a static host. With the local API available, normal mode instead sends the current camera and selected built-in checkpoint to CUS-GS CUDA, which computes ray-ellipsoid depth and multi-scale backprojected normals and returns an overlay frame. A user-selected external PLY can use the browser modes but is not passed to the CUDA endpoint.
 
 The recommended local normal mode follows the UniGS depth-to-normal idea: it backprojects rendered depth, computes camera-facing normals at multiple pixel steps, rejects low-opacity/depth-discontinuity neighborhoods, and fuses trusted estimates before edge-aware smoothing. The optional hybrid and Gaussian-axis modes remain available for comparison. These are rendering improvements for existing RGB-trained checkpoints, not a substitute for UniGS depth/normal-supervised training; 3,000-iteration models can still have noisy or incomplete geometry.
 
 ## Sharing with classmates
 
-Zip the entire `truck_project_page` folder, including `assets/` and `viewer/`. For a quick color-only demo they only need Python 3 and `start_preview.bat`. For live CUS-GS depth/normals they need the CUDA/PyTorch environment, the compiled CUS-GS rasterizer, and `start_project_app.bat`. For photo upload/reconstruction they must also install and configure the full training stack listed above. Do not share private photos or credentials in the archive.
+Zip the entire `truck_project_page` folder, including `assets/` and `viewer/`. For a quick browser demo they only need Python 3 and `start_preview.bat`. For CUS-GS CUDA normals they need the CUDA/PyTorch environment, the compiled CUS-GS rasterizer, and `start_project_app.bat`. For photo upload/reconstruction they must also install and configure the full training stack listed above. Do not share private photos or credentials in the archive.
 
 The viewer loads Three.js and GaussianSplats3D from jsDelivr, so the first load requires internet access. All scene models are bundled locally. Chair and Drums use the public Synthetic NeRF dataset mirror at Hugging Face; each was trained locally with GraphDeco for 3,000 iterations from 100 posed training views. The built-in comparisons use RGB-trained views, not held-out RGB benchmark results.
 
-The cleaned Lego variant uses the original 10K RGB checkpoint and removes Gaussian centers that fall outside the object silhouettes across most of the 100 mask views. It does not add normal supervision or change the renderer. On seven RGB-trained views omitted from mask pruning, the average object PSNR changed from 27.59 to 27.88 dB, full-image PSNR from 6.19 to 22.32 dB, and CUS-GS normal background leakage from 68.0% to 3.9%. See the sibling `work/geometry_gt_probe/` experiment scripts for reproducible evaluation. Local normal mode still requires the CUDA service; GitHub Pages shows the cleaned color model and browser GPU depth mode.
+The cleaned Lego variant uses the original 10K RGB checkpoint and removes Gaussian centers that fall outside the object silhouettes across most of the 100 mask views. It does not add normal supervision. On seven RGB-trained views omitted from mask pruning, the average object PSNR changed from 27.59 to 27.88 dB, full-image PSNR from 6.19 to 22.32 dB, and CUS-GS normal background leakage from 68.0% to 3.9%. See the sibling `work/geometry_gt_probe/` experiment scripts for reproducible evaluation. GitHub Pages provides interactive color, GPU depth, and approximate covariance-normal modes. The local CUDA service provides the separate CUS-GS depth-backprojected normal mode.
 
 Dataset attribution: Chair is credited to 1DInc (CC0); Drums is credited to bryanajones (CC BY). The image/pose mirror is `rishitdagli/nerf-gs-datasets` on Hugging Face; retain these attributions when redistributing the demo.
 
 ## GitHub Pages
 
-The `.github/workflows/pages.yml` workflow deploys the static project page on every push to `main`. Enable **Settings → Pages → Build and deployment → GitHub Actions** once in the repository. GitHub Pages serves the color viewer only; real-time CUDA depth and normals, the local photo library, `/api/*` endpoints, COLMAP, and GPU reconstruction require `start_project_app.bat` on a configured computer. A static host cannot execute this machine's CUDA renderer. The included PLY is below GitHub's 100 MB per-file limit.
+The `.github/workflows/pages.yml` workflow deploys the static project page on every push to `main`. Enable **Settings → Pages → Build and deployment → GitHub Actions** once in the repository. GitHub Pages serves interactive color, GPU depth, and approximate Gaussian covariance normals. The latter are a visualization estimate from the RGB-trained PLY, not the CUS-GS output or supervised ground-truth normals. Real-time CUDA normals, the local photo library, `/api/*` endpoints, COLMAP, and GPU reconstruction require `start_project_app.bat` on a configured computer. A static host cannot execute this machine's CUDA renderer. The included PLY files are below GitHub's 100 MB per-file limit.

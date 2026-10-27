@@ -115,7 +115,7 @@
             <label class="tuning-label" for="depth-far"><span>深度终点 × 焦点距离</span><output id="depth-far-value">1.30</output></label>
             <input id="depth-far" type="range" min="0.5" max="6" step="0.1" value="1.3">
           </div>
-          <div class="mode-note" id="depth-note" hidden>深度图由浏览器 GPU 实时绘制；法向图使用本机 CUS-GS CUDA 光栅器。</div>
+          <div class="mode-note" id="depth-note" hidden>深度图由浏览器 GPU 实时绘制；法向图根据运行环境选择浏览器或本机 CUDA。</div>
         </section>
         <section class="tuning-group" aria-label="渲染器设置">
           <h3>渲染器设置</h3>
@@ -198,7 +198,6 @@
     const embedded = new URLSearchParams(location.search).get('embedded') === '1';
     if (embedded) document.getElementById('render-mode-field').hidden = true;
     const hasLocalGeometryService = ['localhost', '127.0.0.1'].includes(location.hostname);
-    if (!hasLocalGeometryService) document.querySelector('#render-mode option[value="normal"]').disabled = true;
     if (sceneName) {
       document.querySelector('.scene-title h1').textContent = sceneName;
       document.querySelector('.head-right .hint-top').textContent = demoId.endsWith('-3000') || demoId.startsWith('lego-') ? `Synthetic NeRF · ${Number(sceneIterations || 3000).toLocaleString()} iterations` : 'Custom photo reconstruction';
@@ -214,7 +213,8 @@
     const requestedModelUrl = new URLSearchParams(location.search).get('model');
     const modelUrlIsLocal = requestedModelUrl && new URL(requestedModelUrl, location.href).origin === location.origin;
     let modelUrl = modelUrlIsLocal ? requestedModelUrl : bundledModelUrl;
-    let supportsCusGeometry = hasLocalGeometryService && modelUrlIsLocal && ['lego-100', 'lego-1000', 'lego-3000', 'lego-10000', 'lego-10000-clean', 'chair-3000', 'drums-3000'].includes(demoId);
+    let supportsCusGeometry = !new URLSearchParams(location.search).has('browserNormals') && hasLocalGeometryService && modelUrlIsLocal && ['lego-100', 'lego-1000', 'lego-3000', 'lego-10000', 'lego-10000-clean', 'chair-3000', 'drums-3000'].includes(demoId);
+    document.querySelector('#render-mode option[value="normal"]').textContent = supportsCusGeometry ? 'CUS-GS 法向图' : '浏览器 GPU 法向估计';
     let modelName = modelUrl.split('/').pop().replace(/\.[^.]+$/, '');
     let modelIsPly = /\.ply(?:$|\?)/i.test(modelUrl);
     let localModelUrl;
@@ -229,36 +229,56 @@
     let isInteracting = false;
     let lastGeometryMode;
     const geometryOverlay = document.getElementById('geometry-overlay');
+    const browserNormal = () => !supportsCusGeometry;
     const modeNotes = {
       color: '原始 Gaussian 颜色与透明度',
       depth: '浏览器 WebGL GPU 实时深度着色；随相机连续更新',
-      normal: 'CUS-GS CUDA 深度反投影法向；随当前相机重新渲染'
+      normal: browserNormal() ? '浏览器 GPU 协方差法向估计；随相机实时更新，精度低于本机 CUDA 深度法向' : 'CUS-GS CUDA 深度反投影法向；随当前相机重新渲染'
     };
 
     function installRenderModes(activeViewer) {
       const material = activeViewer?.splatMesh?.material;
-      if (!material?.fragmentShader || !material.uniforms) return false;
+      if (!material?.fragmentShader || !material?.vertexShader || !material.uniforms) return false;
       let shaderChanged = false;
       if (!material.uniforms.uRenderMode) {
+        if (!material.vertexShader.includes('mat3 J;') || !material.fragmentShader.includes('vec3 color = vColor.rgb;')) return false;
         material.uniforms.uRenderMode = { value: 0 };
         material.uniforms.uCameraNear = { value: activeViewer.camera.near };
         material.uniforms.uCameraFar = { value: activeViewer.camera.far };
         material.uniforms.uDepthMin = { value: activeViewer.camera.near };
         material.uniforms.uDepthMax = { value: activeViewer.camera.far };
+        material.uniforms.uNormalContrast = { value: 1 };
+        material.vertexShader = material.vertexShader
+          .replace('varying vec4 vColor;', 'varying vec4 vColor;\nvarying vec3 vSurfaceNormal;\nuniform int uRenderMode;')
+          .replace('mat3 J;', `
+            vec3 surfaceNormal = vec3(0.0, 0.0, 1.0);
+            if (uRenderMode == 2) {
+                float covarianceScale = max(max(Vrk[0][0], Vrk[1][1]), Vrk[2][2]);
+                mat3 inverseCovariance = inverse(Vrk / max(covarianceScale, 1e-12) + mat3(0.0005));
+                vec3 n = normalize(vec3(0.719, 0.527, 0.453));
+                for (int i = 0; i < 5; i++) n = normalize(inverseCovariance * n);
+                surfaceNormal = normalize(mat3(transformModelViewMatrix) * n);
+                if (dot(surfaceNormal, -viewCenter.xyz) < 0.0) surfaceNormal = -surfaceNormal;
+            }
+            vSurfaceNormal = surfaceNormal;
+            mat3 J;`);
         material.fragmentShader = material.fragmentShader
-          .replace('uniform vec3 debugColor;', 'uniform vec3 debugColor;\nuniform int uRenderMode;\nuniform float uCameraNear;\nuniform float uCameraFar;\nuniform float uDepthMin;\nuniform float uDepthMax;')
+          .replace('uniform vec3 debugColor;', 'uniform vec3 debugColor;\nuniform int uRenderMode;\nuniform float uCameraNear;\nuniform float uCameraFar;\nuniform float uDepthMin;\nuniform float uDepthMax;\nuniform float uNormalContrast;\nvarying vec3 vSurfaceNormal;')
           .replace('vec3 color = vColor.rgb;', `
                 vec3 color = vColor.rgb;
-                if (uRenderMode != 0) {
+                if (uRenderMode == 1) {
                     float depthNdc = gl_FragCoord.z * 2.0 - 1.0;
                     float viewDepth = (2.0 * uCameraNear * uCameraFar) / max(0.00001, uCameraFar + uCameraNear - depthNdc * (uCameraFar - uCameraNear));
                     float normalizedDepth = clamp((viewDepth - uDepthMin) / max(0.00001, uDepthMax - uDepthMin), 0.0, 1.0);
                     color = vec3(normalizedDepth);
+                } else if (uRenderMode == 2) {
+                    color = clamp(0.5 + 0.5 * uNormalContrast * normalize(vSurfaceNormal), 0.0, 1.0);
                 }`);
         shaderChanged = true;
       }
-      const values = { color: 0, depth: 1, normal: 0 };
+      const values = { color: 0, depth: 1, normal: browserNormal() ? 2 : 0 };
       material.uniforms.uRenderMode.value = values[renderMode] ?? 0;
+      material.uniforms.uNormalContrast.value = Number(document.getElementById('normal-contrast').value);
       material.uniforms.uCameraNear.value = activeViewer.camera.near;
       material.uniforms.uCameraFar.value = activeViewer.camera.far;
       const focusDistance = activeViewer.camera.position.distanceTo(activeViewer.controls?.target || activeViewer.camera.position);
@@ -266,9 +286,7 @@
       const farFactor = Number(document.getElementById('depth-far').value);
       material.uniforms.uDepthMin.value = Math.max(activeViewer.camera.near, focusDistance * nearFactor);
       material.uniforms.uDepthMax.value = Math.max(material.uniforms.uDepthMin.value + 0.01, focusDistance * farFactor);
-      if (activeViewer.renderer) {
-        activeViewer.renderer.setClearColor(renderMode === 'depth' ? 0xffffff : 0x000000, renderMode === 'depth' ? 1 : 0);
-      }
+      if (activeViewer.renderer) activeViewer.renderer.setClearColor(renderMode === 'depth' ? 0xffffff : 0x000000, renderMode === 'depth' ? 1 : 0);
       if (activeViewer.threeScene) activeViewer.threeScene.background = renderMode === 'depth' ? new THREE.Color(0xffffff) : null;
       material.uniformsNeedUpdate = true;
       if (shaderChanged) material.needsUpdate = true;
@@ -284,33 +302,42 @@
         if (mode === 'color') geometryPending = false;
       }
       renderMode = mode;
-      document.getElementById('mode-note').textContent = modeNotes[mode];
+      document.getElementById('mode-note').textContent = mode === 'normal' && browserNormal()
+        ? '浏览器 GPU 协方差法向估计；随相机实时更新，精度低于本机 CUDA 深度法向'
+        : modeNotes[mode];
       document.getElementById('depth-tuning').hidden = mode !== 'depth';
       document.getElementById('depth-note').hidden = !['depth', 'normal'].includes(mode);
+      document.getElementById('depth-note').textContent = browserNormal()
+        ? '深度图与近似法向图均在浏览器 GPU 实时绘制；此模型没有经过真实法向监督。'
+        : '深度图由浏览器 GPU 实时绘制；法向图使用本机 CUS-GS CUDA 光栅器。';
       document.getElementById('normal-contrast-control').hidden = mode !== 'normal';
-      document.getElementById('normal-method-control').hidden = mode !== 'normal';
-      document.getElementById('normal-smoothing-control').hidden = mode !== 'normal';
-      document.getElementById('geometry-resolution-control').hidden = mode !== 'normal';
-      document.getElementById('geometry-fps-control').hidden = mode !== 'normal';
+      document.getElementById('normal-method-control').hidden = mode !== 'normal' || browserNormal();
+      document.getElementById('normal-smoothing-control').hidden = mode !== 'normal' || browserNormal();
+      document.getElementById('geometry-resolution-control').hidden = mode !== 'normal' || browserNormal();
+      document.getElementById('geometry-fps-control').hidden = mode !== 'normal' || browserNormal();
       document.getElementById('viewer-renderer-controls').hidden = mode === 'normal';
       document.getElementById('alpha-control').hidden = mode === 'normal';
       document.querySelector('.stage').classList.toggle('depth-mode', mode === 'depth');
       document.querySelector('.stage').classList.toggle('normal-mode', mode === 'normal');
-      geometryOverlay.hidden = mode !== 'normal';
+      geometryOverlay.hidden = mode !== 'normal' || browserNormal();
       if (viewer) {
-        if (viewer.renderer?.domElement) viewer.renderer.domElement.style.opacity = mode === 'normal' ? '0' : '1';
-        installRenderModes(viewer);
+        if (viewer.renderer?.domElement) viewer.renderer.domElement.style.opacity = mode === 'normal' && !browserNormal() ? '0' : '1';
+        const installed = installRenderModes(viewer);
         if (mode === 'depth') setStatus('浏览器 GPU 深度渲染已就绪');
         if (mode === 'normal') {
-          if (lastGeometryMode !== mode) geometryOverlay.removeAttribute('src');
-          lastGeometryMode = mode;
-          queueGeometryRender(0);
+          if (parent !== window) parent.postMessage({ type: '3dgs-normal-source', source: browserNormal() ? 'browser' : 'cus' }, location.origin);
+          if (browserNormal()) setStatus(installed ? '浏览器 GPU 法向渲染已就绪' : '此模型的浏览器法向着色器不可用');
+          else {
+            if (lastGeometryMode !== mode) geometryOverlay.removeAttribute('src');
+            lastGeometryMode = mode;
+            queueGeometryRender(0);
+          }
         }
       }
     }
 
     function queueGeometryRender(delay = 0) {
-      if (!viewer || renderMode !== 'normal') return;
+      if (!viewer || renderMode !== 'normal' || browserNormal()) return;
       clearTimeout(geometryTimer);
       const updateInterval = 1000 / Number(document.getElementById('geometry-fps').value);
       const throttle = Math.max(0, (isInteracting ? updateInterval : 250) - (performance.now() - geometryLastStartedAt));
@@ -324,7 +351,7 @@
     }
 
     async function renderGeometry() {
-      if (!viewer || renderMode !== 'normal') return;
+      if (!viewer || renderMode !== 'normal' || browserNormal()) return;
       if (geometryInFlight) {
         geometryPending = true;
         return;
@@ -514,8 +541,8 @@
         document.getElementById('offline-notice').hidden = true;
         applySphericalHarmonicsDegree(activeViewer);
         installRenderModes(activeViewer);
-        if (activeViewer.renderer?.domElement) activeViewer.renderer.domElement.style.opacity = renderMode === 'normal' ? '0' : '1';
-        geometryOverlay.hidden = renderMode !== 'normal';
+        if (activeViewer.renderer?.domElement) activeViewer.renderer.domElement.style.opacity = renderMode === 'normal' && !browserNormal() ? '0' : '1';
+        geometryOverlay.hidden = renderMode !== 'normal' || browserNormal();
         activeViewer.start();
         activeViewer.controls?.addEventListener('start', () => {
           isInteracting = true;
@@ -529,7 +556,7 @@
           }
         });
         activeViewer.controls?.addEventListener('change', () => {
-          if (renderMode === 'depth') installRenderModes(activeViewer);
+          if (renderMode === 'depth' || (renderMode === 'normal' && browserNormal())) installRenderModes(activeViewer);
           else queueGeometryRender();
         });
         if (window.ResizeObserver) new ResizeObserver(() => queueGeometryRender(100)).observe(container);
@@ -573,6 +600,7 @@
     document.getElementById('normal-contrast').addEventListener('input', event => {
       document.getElementById('normal-contrast-value').value = `${Number(event.target.value).toFixed(2)}×`;
       persistRendererSettings();
+      if (browserNormal() && viewer) installRenderModes(viewer);
       queueGeometryRender(80);
     });
     document.getElementById('normal-smoothing').addEventListener('input', event => {
@@ -666,8 +694,9 @@
       viewer = new GaussianSplats3D.Viewer({ rootElement:container, cameraUp:[0,0,1], initialCameraPosition:initialPosition, initialCameraLookAt:initialLookAt, sharedMemoryForWorkers:false, gpuAcceleratedSort:false, sphericalHarmonicsDegree:2, antialiased:document.getElementById('antialias').checked });
       setStatus(`载入 ${file.name}…`);
       supportsCusGeometry = false;
+      document.querySelector('#render-mode option[value="normal"]').textContent = '浏览器 GPU 法向估计';
       const activeViewer = viewer;
-      activeViewer.addSplatScene(localUrl, { showLoadingUI:false, progressiveLoad:false }).then(() => { if (generation !== viewerGeneration || viewer !== activeViewer) return; applySphericalHarmonicsDegree(activeViewer); installRenderModes(activeViewer); activeViewer.start(); activeViewer.controls?.addEventListener('start', () => { isInteracting = true; clearTimeout(geometryTimer); geometryPending = false; }); activeViewer.controls?.addEventListener('end', () => { isInteracting = false; if (renderMode === 'normal') queueGeometryRender(0); }); activeViewer.controls?.addEventListener('change', () => { if (renderMode === 'depth') installRenderModes(activeViewer); else queueGeometryRender(); }); if (window.ResizeObserver) new ResizeObserver(() => queueGeometryRender(100)).observe(container); setStatus(`已载入 ${file.name}`); if (parent !== window) parent.postMessage({ type: '3dgs-viewer-ready' }, location.origin); }).catch(error => { if (generation !== viewerGeneration || viewer !== activeViewer) return; console.error(error); setStatus('文件载入失败'); URL.revokeObjectURL(localUrl); });
+      activeViewer.addSplatScene(localUrl, { showLoadingUI:false, progressiveLoad:false }).then(() => { if (generation !== viewerGeneration || viewer !== activeViewer) return; applySphericalHarmonicsDegree(activeViewer); installRenderModes(activeViewer); if (activeViewer.renderer?.domElement) activeViewer.renderer.domElement.style.opacity = '1'; geometryOverlay.hidden = true; activeViewer.start(); activeViewer.controls?.addEventListener('start', () => { isInteracting = true; clearTimeout(geometryTimer); geometryPending = false; }); activeViewer.controls?.addEventListener('end', () => { isInteracting = false; if (renderMode === 'normal') queueGeometryRender(0); }); activeViewer.controls?.addEventListener('change', () => { if (renderMode === 'depth' || renderMode === 'normal') installRenderModes(activeViewer); else queueGeometryRender(); }); if (window.ResizeObserver) new ResizeObserver(() => queueGeometryRender(100)).observe(container); setStatus(`已载入 ${file.name}`); if (parent !== window) parent.postMessage({ type: '3dgs-viewer-ready' }, location.origin); }).catch(error => { if (generation !== viewerGeneration || viewer !== activeViewer) return; console.error(error); setStatus('文件载入失败'); URL.revokeObjectURL(localUrl); });
     });
   </script>
 </body>
