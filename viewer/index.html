@@ -214,7 +214,7 @@
     const requestedModelUrl = new URLSearchParams(location.search).get('model');
     const modelUrlIsLocal = requestedModelUrl && new URL(requestedModelUrl, location.href).origin === location.origin;
     let modelUrl = modelUrlIsLocal ? requestedModelUrl : bundledModelUrl;
-    let supportsCusGeometry = hasLocalGeometryService && modelUrlIsLocal && ['lego-100', 'lego-1000', 'lego-3000', 'chair-3000', 'drums-3000'].includes(demoId);
+    let supportsCusGeometry = hasLocalGeometryService && modelUrlIsLocal && ['lego-100', 'lego-1000', 'lego-3000', 'lego-10000', 'lego-10000-clean', 'chair-3000', 'drums-3000'].includes(demoId);
     let modelName = modelUrl.split('/').pop().replace(/\.[^.]+$/, '');
     let modelIsPly = /\.ply(?:$|\?)/i.test(modelUrl);
     let localModelUrl;

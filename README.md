@@ -1,6 +1,6 @@
 # Truck 3D Gaussian Splatting Demo
 
-An interactive project page for viewing trained 3D Gaussian Splatting scenes. The built-in selector contains three different Synthetic NeRF scenes: Chair, Drums, and Lego. Selecting one updates its own Gaussian model, reference/render images, training information, and geometry-rendering model ID. It also includes camera controls, real-time CUS-GS CUDA depth/normal modes, local PLY/SPLAT/KSPLAT loading, saved camera views, model export, project-library UI, and an optional local photo-reconstruction service.
+An interactive project page for viewing trained 3D Gaussian Splatting scenes. The built-in selector contains three different Synthetic NeRF scenes: Chair, Drums, and Lego, with multiple Lego checkpoints including a background-pruned 10K variant. Selecting one updates its own Gaussian model, reference/render images, training information, and geometry-rendering model ID. It also includes camera controls, real-time CUS-GS CUDA depth/normal modes, local PLY/SPLAT/KSPLAT loading, saved camera views, model export, project-library UI, and an optional local photo-reconstruction service.
 
 ## Quick preview (Windows)
 
@@ -32,6 +32,7 @@ GitHub Pages and `start_preview.bat` only serve static files; neither can perfor
 - `viewer/index.html`: interactive Three.js Gaussian Splat viewer.
 - `assets/lego_3000_3dgs.ply`, `assets/demos/chair-3000.ply`, `assets/demos/drums-3000.ply`: built-in trained scene models.
 - `assets/demos/`: per-scene PLY models and matching training-view renders.
+- `assets/demos/lego-10000-clean.ply`: 10K Lego RGB checkpoint with multi-view silhouette pruning. It removes 38,434 of 223,629 Gaussians using 100 training-view alpha masks; the original 10K model remains selectable.
 - `assets/lego-gt.png`, `assets/lego-render.png`: static comparison imagery.
 - `project_server.py`: local API for project metadata, image uploads, COLMAP, training, and generated outputs.
 - `start_preview.bat`: static preview server.
@@ -45,7 +46,9 @@ The recommended local normal mode follows the UniGS depth-to-normal idea: it bac
 
 Zip the entire `truck_project_page` folder, including `assets/` and `viewer/`. For a quick color-only demo they only need Python 3 and `start_preview.bat`. For live CUS-GS depth/normals they need the CUDA/PyTorch environment, the compiled CUS-GS rasterizer, and `start_project_app.bat`. For photo upload/reconstruction they must also install and configure the full training stack listed above. Do not share private photos or credentials in the archive.
 
-The viewer loads Three.js and GaussianSplats3D from jsDelivr, so the first load requires internet access. All three scene models are bundled locally. Chair and Drums use the public Synthetic NeRF dataset mirror at Hugging Face; each was trained locally with GraphDeco for 3,000 iterations from 100 posed training views. The built-in comparisons use training views, not held-out benchmark results.
+The viewer loads Three.js and GaussianSplats3D from jsDelivr, so the first load requires internet access. All scene models are bundled locally. Chair and Drums use the public Synthetic NeRF dataset mirror at Hugging Face; each was trained locally with GraphDeco for 3,000 iterations from 100 posed training views. The built-in comparisons use RGB-trained views, not held-out RGB benchmark results.
+
+The cleaned Lego variant uses the original 10K RGB checkpoint and removes Gaussian centers that fall outside the object silhouettes across most of the 100 mask views. It does not add normal supervision or change the renderer. On seven RGB-trained views omitted from mask pruning, the average object PSNR changed from 27.59 to 27.88 dB, full-image PSNR from 6.19 to 22.32 dB, and CUS-GS normal background leakage from 68.0% to 3.9%. See the sibling `work/geometry_gt_probe/` experiment scripts for reproducible evaluation. Local normal mode still requires the CUDA service; GitHub Pages shows the cleaned color model and browser GPU depth mode.
 
 Dataset attribution: Chair is credited to 1DInc (CC0); Drums is credited to bryanajones (CC BY). The image/pose mirror is `rishitdagli/nerf-gs-datasets` on Hugging Face; retain these attributions when redistributing the demo.
 

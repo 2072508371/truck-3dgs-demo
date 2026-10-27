@@ -22,6 +22,8 @@ PLY_PATHS = {
     "lego-100": PAGE_DIR / "assets" / "demos" / "lego-100.ply",
     "lego-1000": PAGE_DIR / "assets" / "demos" / "lego-1000.ply",
     "lego-3000": PAGE_DIR / "assets" / "lego_3000_3dgs.ply",
+    "lego-10000": PAGE_DIR / "assets" / "demos" / "lego-10000.ply",
+    "lego-10000-clean": PAGE_DIR / "assets" / "demos" / "lego-10000-clean.ply",
     "chair-3000": PAGE_DIR / "assets" / "demos" / "chair-3000.ply",
     "drums-3000": PAGE_DIR / "assets" / "demos" / "drums-3000.ply",
 }
