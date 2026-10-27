@@ -55,7 +55,9 @@ def project_list() -> list[dict]:
     items = []
     builtins = [
         ("chair-3000", "Chair · 3,000 iterations", 3000, "assets/demos/chair-3000.ply", "assets/demos/chair-3000.png", "assets/demos/chair-reference.png", 100),
+        ("chair-3000-clean", "Chair · 3,000 · 背景清理", 3000, "assets/demos/chair-3000-clean.ply", "assets/demos/chair-3000-clean.png", "assets/demos/chair-3000-clean-reference.png", 100),
         ("drums-3000", "Drums · 3,000 iterations", 3000, "assets/demos/drums-3000.ply", "assets/demos/drums-3000.png", "assets/demos/drums-reference.png", 100),
+        ("drums-3000-clean", "Drums · 3,000 · 背景清理", 3000, "assets/demos/drums-3000-clean.ply", "assets/demos/drums-3000-clean.png", "assets/demos/drums-3000-clean-reference.png", 100),
         ("lego-3000", "Lego · 3,000 iterations", 3000, "assets/lego_3000_3dgs.ply", "assets/lego-render.png", "assets/lego-gt.png", 136),
         ("lego-10000", "Lego · 10,000 iterations", 10000, "assets/demos/lego-10000.ply", "assets/demos/lego-10000.png", "assets/lego-gt.png", 136),
         ("lego-10000-clean", "Lego · 10,000 · 背景优化", 10000, "assets/demos/lego-10000-clean.ply", "assets/demos/lego-10000-clean.png", "assets/demos/lego-10000-clean-reference.png", 136),
@@ -73,7 +75,7 @@ def project_list() -> list[dict]:
             "image_count": image_count, "gaussian_count": gaussian_count,
             "model_url": f"/{model_rel}", "render_url": render_rel,
             "reference_url": reference_rel, "model_size": f"{model_file.stat().st_size / 1_000_000:.1f} MB" if model_file.is_file() else "—",
-            "view_label": ("TRAINED VIEW R_101" if project_id == "lego-10000-clean" else "TRAIN VIEW 035") if project_id.startswith("lego-") else "TRAIN VIEW 000", "updated_at": "Built-in scene demo", "is_builtin": True,
+            "view_label": ("TRAINED VIEW R_101" if project_id == "lego-10000-clean" else "TRAIN VIEW 035") if project_id.startswith("lego-") else ("TRAIN VIEW 003 · MASK-OMITTED" if project_id.endswith("-clean") else "TRAIN VIEW 000"), "updated_at": "Built-in scene demo", "is_builtin": True,
         })
     if PROJECTS_DIR.exists():
         for folder in PROJECTS_DIR.iterdir():

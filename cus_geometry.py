@@ -25,7 +25,9 @@ PLY_PATHS = {
     "lego-10000": PAGE_DIR / "assets" / "demos" / "lego-10000.ply",
     "lego-10000-clean": PAGE_DIR / "assets" / "demos" / "lego-10000-clean.ply",
     "chair-3000": PAGE_DIR / "assets" / "demos" / "chair-3000.ply",
+    "chair-3000-clean": PAGE_DIR / "assets" / "demos" / "chair-3000-clean.ply",
     "drums-3000": PAGE_DIR / "assets" / "demos" / "drums-3000.ply",
+    "drums-3000-clean": PAGE_DIR / "assets" / "demos" / "drums-3000-clean.ply",
 }
 sys.path.insert(0, str(RASTERIZER))
 

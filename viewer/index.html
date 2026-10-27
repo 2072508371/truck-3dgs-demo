@@ -200,7 +200,7 @@
     const hasLocalGeometryService = ['localhost', '127.0.0.1'].includes(location.hostname);
     if (sceneName) {
       document.querySelector('.scene-title h1').textContent = sceneName;
-      document.querySelector('.head-right .hint-top').textContent = demoId.endsWith('-3000') || demoId.startsWith('lego-') ? `Synthetic NeRF · ${Number(sceneIterations || 3000).toLocaleString()} iterations` : 'Custom photo reconstruction';
+      document.querySelector('.head-right .hint-top').textContent = demoId.startsWith('chair-') || demoId.startsWith('drums-') || demoId.startsWith('lego-') ? `Synthetic NeRF · ${Number(sceneIterations || 3000).toLocaleString()} iterations` : 'Custom photo reconstruction';
     }
     if (sceneIterations) document.getElementById('viewer-iterations').textContent = Number(sceneIterations).toLocaleString();
     const status = document.getElementById('load-status');
@@ -213,7 +213,7 @@
     const requestedModelUrl = new URLSearchParams(location.search).get('model');
     const modelUrlIsLocal = requestedModelUrl && new URL(requestedModelUrl, location.href).origin === location.origin;
     let modelUrl = modelUrlIsLocal ? requestedModelUrl : bundledModelUrl;
-    let supportsCusGeometry = !new URLSearchParams(location.search).has('browserNormals') && hasLocalGeometryService && modelUrlIsLocal && ['lego-100', 'lego-1000', 'lego-3000', 'lego-10000', 'lego-10000-clean', 'chair-3000', 'drums-3000'].includes(demoId);
+    let supportsCusGeometry = !new URLSearchParams(location.search).has('browserNormals') && hasLocalGeometryService && modelUrlIsLocal && ['lego-100', 'lego-1000', 'lego-3000', 'lego-10000', 'lego-10000-clean', 'chair-3000', 'chair-3000-clean', 'drums-3000', 'drums-3000-clean'].includes(demoId);
     document.querySelector('#render-mode option[value="normal"]').textContent = supportsCusGeometry ? 'CUS-GS 法向图' : '浏览器 GPU 法向估计';
     let modelName = modelUrl.split('/').pop().replace(/\.[^.]+$/, '');
     let modelIsPly = /\.ply(?:$|\?)/i.test(modelUrl);
