@@ -32,22 +32,23 @@ async function api(path, options) {
 }
 
 function setRenderMode(mode) {
-  if (!['color', 'cus-color', 'depth', 'normal', 'gaussians'].includes(mode)) return;
+  if (!['color', 'cus-color', 'depth', 'normal', 'feature-dino', 'gaussians'].includes(mode)) return;
   selectedRenderMode = mode;
   document.querySelectorAll('[data-render-mode]').forEach(button => {
     button.setAttribute('aria-pressed', String(button.dataset.renderMode === mode));
   });
   renderStatus.textContent = mode === 'normal'
     ? (isLocalApp ? '正在计算本机 CUS-GS 法向图…' : '浏览器 GPU 近似法向图；可随相机实时转动')
-    : mode === 'depth' ? '浏览器 GPU 实时深度图' : mode === 'gaussians' ? '原始 Gaussian 参数的三维椭球抽样展示' : mode === 'cus-color' ? 'CUS-GS CUDA 正在按当前视角渲染彩色图…' : '交互彩色渲染';
+    : mode === 'depth' ? '浏览器 GPU 实时深度图' : mode === 'gaussians' ? '原始 Gaussian 参数的三维椭球抽样展示' : mode === 'cus-color' ? 'CUS-GS CUDA 正在按当前视角渲染彩色图…' : mode === 'feature-dino' ? (isLocalApp ? '本机 CUS-GS 正在渲染 DINOv2 特征图…' : '浏览器 GPU 正在载入 DINOv2 特征图…') : '交互彩色渲染';
   viewerFrame.contentWindow?.postMessage({ type: '3dgs-render-mode', mode }, location.origin);
 }
 
 window.addEventListener('message', event => {
   if (event.origin !== location.origin || event.source !== viewerFrame.contentWindow) return;
   if (event.data?.type === '3dgs-viewer-ready') setRenderMode(selectedRenderMode);
-  if (event.data?.type === '3dgs-geometry-progress') renderStatus.textContent = event.data.mode === 'cus-color' ? '正在按当前相机渲染 CUS-GS 彩色图…' : '正在按当前相机重新计算 CUS-GS 法向图…';
-  if (event.data?.type === '3dgs-geometry-rendered') renderStatus.textContent = event.data.mode === 'cus-color' ? 'CUS-GS CUDA 彩色图已同步到当前相机' : 'CUS-GS CUDA 法向图已同步到当前相机';
+  if (event.data?.type === '3dgs-feature-ready' && selectedRenderMode === 'feature-dino') renderStatus.textContent = 'DINOv2 多视角特征图已就绪 · 随相机实时更新';
+  if (event.data?.type === '3dgs-geometry-progress') renderStatus.textContent = event.data.mode === 'cus-color' ? '正在按当前相机渲染 CUS-GS 彩色图…' : event.data.mode === 'feature-dino' ? '正在按当前相机渲染 CUS-GS DINOv2 特征图…' : '正在按当前相机重新计算 CUS-GS 法向图…';
+  if (event.data?.type === '3dgs-geometry-rendered') renderStatus.textContent = event.data.mode === 'cus-color' ? 'CUS-GS CUDA 彩色图已同步到当前相机' : event.data.mode === 'feature-dino' ? 'CUS-GS CUDA DINOv2 特征图已同步到当前相机' : 'CUS-GS CUDA 法向图已同步到当前相机';
   if (event.data?.type === '3dgs-geometry-error') {
     setRenderMode('color');
     renderStatus.textContent = `实时深度/法向不可用：${event.data.message}`;
@@ -255,6 +256,9 @@ function configureDemoPicker(projects = []) {
 }
 
 function applyDemo(demo, isUploaded = false) {
+  const featureButton = document.querySelector('[data-render-mode="feature-dino"]');
+  featureButton.hidden = isUploaded || !builtinDemos.some(item => item.id === demo.id);
+  if (featureButton.hidden && selectedRenderMode === 'feature-dino') setRenderMode('color');
   const iterations = Number(demo.iterations || 30000);
   const name = demo.name || 'Untitled scene';
   const modelUrl = new URL(demo.model_url, location.href).href;

@@ -106,7 +106,7 @@
         <div class="side-head"><h2>Scene controls</h2><span class="tag">PLY · 3DGS</span></div>
         <div class="field"><div class="label-row"><label>Camera position</label></div><div class="vec"><input id="px" type="number" step="0.1" value="0"><input id="py" type="number" step="0.1" value="4.2"><input id="pz" type="number" step="0.1" value="1.5"></div></div>
         <div class="field"><div class="label-row"><label>Camera look-at</label></div><div class="vec"><input id="tx" type="number" step="0.1" value="0"><input id="ty" type="number" step="0.1" value="0"><input id="tz" type="number" step="0.1" value="0"></div></div>
-    <div class="field" id="render-mode-field"><div class="label-row"><label for="render-mode">渲染模式</label></div><select class="mode-select" id="render-mode"><option value="color">彩色外观</option><option value="cus-color">CUS-GS CUDA 彩色（本机）</option><option value="depth">GPU 实时深度图</option><option value="normal">CUS-GS 法向图</option><option value="gaussians">高斯球 · 原始形状</option></select><div class="mode-note" id="mode-note">原始 Gaussian 颜色与透明度</div></div>
+    <div class="field" id="render-mode-field"><div class="label-row"><label for="render-mode">渲染模式</label></div><select class="mode-select" id="render-mode"><option value="color">彩色外观</option><option value="cus-color">CUS-GS CUDA 彩色（本机）</option><option value="depth">GPU 实时深度图</option><option value="normal">CUS-GS 法向图</option><option value="feature-dino">DINOv2 特征图</option><option value="gaussians">高斯球 · 原始形状</option></select><div class="mode-note" id="mode-note">原始 Gaussian 颜色与透明度</div></div>
         <section class="tuning-group" aria-label="渲染参数">
           <h3>渲染参数</h3>
           <div class="tuning-control" id="depth-tuning" hidden>
@@ -222,6 +222,8 @@
     const modelUrlIsLocal = requestedModelUrl && new URL(requestedModelUrl, location.href).origin === location.origin;
     let modelUrl = modelUrlIsLocal ? requestedModelUrl : bundledModelUrl;
     let supportsCusGeometry = !new URLSearchParams(location.search).has('browserNormals') && hasLocalGeometryService && modelUrlIsLocal && ['lego-100', 'lego-1000', 'lego-3000', 'lego-10000', 'lego-10000-clean', 'chair-3000', 'chair-3000-clean', 'drums-3000', 'drums-3000-clean'].includes(demoId);
+    const hasFeatureData = /^(lego-(3000|10000|10000-clean)|chair-3000(-clean)?|drums-3000(-clean)?)$/.test(demoId);
+    document.querySelector('#render-mode option[value="feature-dino"]').hidden = !hasFeatureData;
     document.querySelector('#render-mode option[value="normal"]').textContent = supportsCusGeometry ? 'CUS-GS 法向图' : '浏览器 GPU 法向估计';
     let modelName = modelUrl.split('/').pop().replace(/\.[^.]+$/, '');
     let modelIsPly = /\.ply(?:$|\?)/i.test(modelUrl);
@@ -240,14 +242,81 @@
     let lastGeometryMode;
     const geometryOverlay = document.getElementById('geometry-overlay');
     const browserNormal = () => !supportsCusGeometry;
-    const isCudaMode = mode => mode === 'cus-color' || (mode === 'normal' && !browserNormal());
+    const isCudaMode = mode => mode === 'cus-color' || ((mode === 'normal' || mode === 'feature-dino') && !browserNormal());
     const modeNotes = {
       color: '原始 Gaussian 颜色与透明度',
       'cus-color': '本机 CUS-GS CUDA 光栅器；同一份 PLY、当前相机，支持球谐彩色输出',
       depth: '浏览器 WebGL GPU 实时深度着色；随相机连续更新',
       normal: browserNormal() ? '浏览器 GPU 协方差短轴法向估计；随相机实时更新，未经真实法向基准验证' : 'CUS-GS CUDA 法向图；可切换深度、短轴或融合算法',
+      'feature-dino': browserNormal() ? '32 个训练视角的 DINOv2 特征融合到 Gaussian；PCA 伪彩色，浏览器 GPU 实时绘制' : '32 个训练视角的 DINOv2 特征融合到 Gaussian；本机 CUS-GS CUDA 实时绘制（非原生特征训练）',
       gaussians: '原始 PLY 的三维 Gaussian 椭球抽样；线框显示真实缩放和旋转'
     };
+
+    let featureTexture;
+    let featureTextureViewer;
+    let featureLoadPromise;
+    function featureKey(x, y, z) {
+      return `${Math.round(x * 10000)},${Math.round(y * 10000)},${Math.round(z * 10000)}`;
+    }
+    async function loadBrowserFeature(activeViewer) {
+      if (featureTextureViewer === activeViewer) {
+        setStatus('DINOv2 特征图已就绪');
+        if (parent !== window) parent.postMessage({ type: '3dgs-feature-ready' }, location.origin);
+        return;
+      }
+      if (featureLoadPromise) return featureLoadPromise;
+      if (!hasFeatureData) throw new Error('此场景没有 DINOv2 特征数据');
+      setStatus('正在载入 DINOv2 特征…');
+      featureLoadPromise = (async () => {
+        const response = await fetch(`../assets/features/${demoId}-dinov2.bin`);
+        if (!response.ok) throw new Error(`特征文件加载失败 (${response.status})`);
+        const data = await response.arrayBuffer();
+        const view = new DataView(data);
+        const count = view.getUint32(0, true);
+        if (data.byteLength !== 4 + count * 16) throw new Error('特征文件长度错误');
+        const featureByCenter = new Map();
+        for (let i = 0; i < count; i++) {
+          const offset = 4 + i * 16;
+          featureByCenter.set(featureKey(view.getFloat32(offset, true), view.getFloat32(offset + 4, true), view.getFloat32(offset + 8, true)), offset + 12);
+        }
+        const splats = activeViewer.splatMesh;
+        const total = splats.getSplatCount();
+        const width = Math.ceil(Math.sqrt(total));
+        const height = Math.ceil(total / width);
+        const pixels = new Uint8Array(width * height * 4);
+        const center = new THREE.Vector3();
+        let matched = 0;
+        for (let i = 0; i < total; i++) {
+          splats.getSplatCenter(i, center);
+          const offset = featureByCenter.get(featureKey(center.x, center.y, center.z));
+          if (offset === undefined) continue;
+          pixels[i * 4] = view.getUint8(offset);
+          pixels[i * 4 + 1] = view.getUint8(offset + 1);
+          pixels[i * 4 + 2] = view.getUint8(offset + 2);
+          pixels[i * 4 + 3] = 255;
+          matched++;
+        }
+        if (matched < total * 0.9) throw new Error(`仅匹配 ${matched}/${total} 个 Gaussian，特征图未启用`);
+        const texture = new THREE.DataTexture(pixels, width, height, THREE.RGBAFormat, THREE.UnsignedByteType);
+        texture.magFilter = THREE.NearestFilter;
+        texture.minFilter = THREE.NearestFilter;
+        texture.generateMipmaps = false;
+        texture.needsUpdate = true;
+        featureTexture?.dispose();
+        featureTexture = texture;
+        featureTextureViewer = activeViewer;
+        featureByCenter.clear();
+        const material = splats.material;
+        material.uniforms.uFeatureTexture.value = texture;
+        material.uniforms.uFeatureTextureSize.value.set(width, height);
+        if (viewer === activeViewer && renderMode === 'feature-dino') {
+          installRenderModes(activeViewer);
+          setStatus(`DINOv2 特征图已就绪 · ${matched.toLocaleString()} 个 Gaussian`);
+          if (parent !== window) parent.postMessage({ type: '3dgs-feature-ready' }, location.origin);
+        }
+      })();
+      try { await featureLoadPromise; } finally { featureLoadPromise = undefined; }
+    }
 
     function removeEllipsoidPreview() {
       if (!ellipsoidMesh) return;
@@ -318,13 +387,15 @@
       if (!material.uniforms.uRenderMode) {
         if (!material.vertexShader.includes('mat3 J;') || !material.fragmentShader.includes('vec3 color = vColor.rgb;')) return false;
         material.uniforms.uRenderMode = { value: 0 };
+        material.uniforms.uFeatureTexture = { value: new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat) };
+        material.uniforms.uFeatureTextureSize = { value: new THREE.Vector2(1, 1) };
         material.uniforms.uCameraNear = { value: activeViewer.camera.near };
         material.uniforms.uCameraFar = { value: activeViewer.camera.far };
         material.uniforms.uDepthMin = { value: activeViewer.camera.near };
         material.uniforms.uDepthMax = { value: activeViewer.camera.far };
         material.uniforms.uNormalContrast = { value: 1 };
         material.vertexShader = material.vertexShader
-          .replace('varying vec4 vColor;', 'varying vec4 vColor;\nvarying vec3 vSurfaceNormal;\nuniform int uRenderMode;')
+          .replace('varying vec4 vColor;', 'varying vec4 vColor;\nvarying vec3 vSurfaceNormal;\nuniform int uRenderMode;\nuniform sampler2D uFeatureTexture;\nuniform vec2 uFeatureTextureSize;')
           .replace('mat3 J;', `
             vec3 surfaceNormal = vec3(0.0, 0.0, 1.0);
             if (uRenderMode == 2) {
@@ -336,6 +407,11 @@
                 if (dot(surfaceNormal, -viewCenter.xyz) < 0.0) surfaceNormal = -surfaceNormal;
             }
             vSurfaceNormal = surfaceNormal;
+            if (uRenderMode == 3) {
+                int featureWidth = int(uFeatureTextureSize.x);
+                ivec2 featureUV = ivec2(int(splatIndex) % featureWidth, int(splatIndex) / featureWidth);
+                vColor.rgb = texelFetch(uFeatureTexture, featureUV, 0).rgb;
+            }
             mat3 J;`);
         material.fragmentShader = material.fragmentShader
           .replace('uniform vec3 debugColor;', 'uniform vec3 debugColor;\nuniform int uRenderMode;\nuniform float uCameraNear;\nuniform float uCameraFar;\nuniform float uDepthMin;\nuniform float uDepthMax;\nuniform float uNormalContrast;\nvarying vec3 vSurfaceNormal;')
@@ -351,7 +427,7 @@
                 }`);
         shaderChanged = true;
       }
-      const values = { color: 0, depth: 1, normal: browserNormal() ? 2 : 0 };
+      const values = { color: 0, depth: 1, normal: browserNormal() ? 2 : 0, 'feature-dino': browserNormal() && featureTextureViewer === activeViewer ? 3 : 0 };
       material.uniforms.uRenderMode.value = values[renderMode] ?? 0;
       material.uniforms.uNormalContrast.value = Number(document.getElementById('normal-contrast').value);
       material.uniforms.uCameraNear.value = activeViewer.camera.near;
@@ -370,7 +446,7 @@
     }
 
     function setRenderMode(mode) {
-      if (!['color', 'cus-color', 'depth', 'normal', 'gaussians'].includes(mode)) return;
+      if (!['color', 'cus-color', 'depth', 'normal', 'feature-dino', 'gaussians'].includes(mode)) return;
       if (mode !== renderMode) {
         geometryRequestId++;
         clearTimeout(geometryTimer);
@@ -391,8 +467,8 @@
       document.getElementById('normal-smoothing-control').hidden = mode !== 'normal' || browserNormal();
       document.getElementById('geometry-resolution-control').hidden = !isCudaMode(mode);
       document.getElementById('geometry-fps-control').hidden = !isCudaMode(mode);
-      document.getElementById('viewer-renderer-controls').hidden = mode === 'normal' || mode === 'gaussians';
-      document.getElementById('alpha-control').hidden = mode === 'normal' || mode === 'cus-color';
+      document.getElementById('viewer-renderer-controls').hidden = mode === 'normal' || mode === 'gaussians' || mode === 'feature-dino';
+      document.getElementById('alpha-control').hidden = mode === 'normal' || mode === 'cus-color' || mode === 'feature-dino';
       document.querySelector('.stage').classList.toggle('depth-mode', mode === 'depth');
       document.querySelector('.stage').classList.toggle('normal-mode', mode === 'normal');
       geometryOverlay.hidden = true;
@@ -406,6 +482,13 @@
           if (lastGeometryMode !== mode) geometryOverlay.removeAttribute('src');
           lastGeometryMode = mode;
           queueGeometryRender(0);
+        }
+        if (mode === 'feature-dino') {
+          if (supportsCusGeometry) {
+            if (lastGeometryMode !== mode) geometryOverlay.removeAttribute('src');
+            lastGeometryMode = mode;
+            queueGeometryRender(0);
+          } else loadBrowserFeature(viewer).catch(error => setStatus(`特征图不可用：${error.message}`));
         }
         if (mode === 'normal') {
           if (parent !== window) parent.postMessage({ type: '3dgs-normal-source', source: browserNormal() ? 'browser' : 'cus' }, location.origin);
@@ -452,7 +535,7 @@
       const width = Math.max(128, Math.round(bounds.width * scale));
       const height = Math.max(128, Math.round(bounds.height * scale));
       const focusDistance = camera.position.distanceTo(viewer.controls?.target || camera.position);
-      setStatus(requestedMode === 'cus-color' ? 'CUS-GS 正在按当前视角渲染彩色图…' : 'CUS-GS 正在按当前视角计算法向图…');
+      setStatus(requestedMode === 'cus-color' ? 'CUS-GS 正在按当前视角渲染彩色图…' : requestedMode === 'feature-dino' ? 'CUS-GS 正在按当前视角渲染 DINOv2 特征图…' : 'CUS-GS 正在按当前视角计算法向图…');
       if (parent !== window) parent.postMessage({ type: '3dgs-geometry-progress', mode: requestedMode }, location.origin);
       try {
         if (!supportsCusGeometry) throw new Error('CUS-GS 实时几何渲染目前仅支持内置训练检查点。');
@@ -486,10 +569,10 @@
         if (geometryObjectUrl) URL.revokeObjectURL(geometryObjectUrl);
         geometryObjectUrl = blobUrl;
         geometryOverlay.src = blobUrl;
-        geometryOverlay.alt = requestedMode === 'cus-color' ? 'CUS-GS CUDA color rasterization at the current interactive camera' : normalMethod === 'gaussian' ? 'Camera-facing Gaussian covariance normals at the current interactive camera' : normalMethod === 'hybrid' ? 'Blended Gaussian covariance and depth-derived normals at the current interactive camera' : 'CUS-GS depth-backprojected normal at the current interactive camera';
+        geometryOverlay.alt = requestedMode === 'cus-color' ? 'CUS-GS CUDA color rasterization at the current interactive camera' : requestedMode === 'feature-dino' ? 'CUS-GS CUDA DINOv2 feature map at the current interactive camera' : normalMethod === 'gaussian' ? 'Camera-facing Gaussian covariance normals at the current interactive camera' : normalMethod === 'hybrid' ? 'Blended Gaussian covariance and depth-derived normals at the current interactive camera' : 'CUS-GS depth-backprojected normal at the current interactive camera';
         geometryOverlay.hidden = false;
         if (viewer.renderer?.domElement) viewer.renderer.domElement.style.opacity = '0';
-        setStatus(requestedMode === 'cus-color' ? 'CUS-GS 彩色图已更新' : 'CUS-GS 法向图已更新');
+        setStatus(requestedMode === 'cus-color' ? 'CUS-GS 彩色图已更新' : requestedMode === 'feature-dino' ? 'CUS-GS DINOv2 特征图已更新' : 'CUS-GS 法向图已更新');
         if (parent !== window) parent.postMessage({ type: '3dgs-geometry-rendered', mode: requestedMode }, location.origin);
       } catch (error) {
         if (requestId !== geometryRequestId || renderMode !== requestedMode) return;
@@ -649,6 +732,7 @@
         });
         if (window.ResizeObserver) new ResizeObserver(() => queueGeometryRender(100)).observe(container);
         if (isCudaMode(renderMode)) queueGeometryRender(0);
+        if (renderMode === 'feature-dino' && !supportsCusGeometry) loadBrowserFeature(activeViewer).catch(error => setStatus(`特征图不可用：${error.message}`));
         if (renderMode !== 'gaussians') setStatus('场景已就绪');
         if (parent !== window) parent.postMessage({ type: '3dgs-viewer-ready' }, location.origin);
       }).catch(error => {
@@ -708,7 +792,7 @@
     });
     window.addEventListener('message', event => {
       if (event.source !== parent || event.origin !== location.origin) return;
-      if (event.data?.type === '3dgs-render-mode' && ['color', 'cus-color', 'depth', 'normal', 'gaussians'].includes(event.data.mode)) {
+      if (event.data?.type === '3dgs-render-mode' && ['color', 'cus-color', 'depth', 'normal', 'feature-dino', 'gaussians'].includes(event.data.mode)) {
         document.getElementById('render-mode').value = event.data.mode;
         setRenderMode(event.data.mode);
       }

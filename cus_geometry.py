@@ -36,6 +36,7 @@ from diff_gaussian_rasterization import GaussianRasterizationSettings, _Rasteriz
 
 _lock = threading.Lock()
 _gaussians: dict[str, dict] = {}
+_feature_queries: dict[tuple[str, str], torch.Tensor] = {}
 
 
 def _load_gaussians(model_id: str) -> dict:
@@ -105,6 +106,24 @@ def _matrix(values: list[float]) -> torch.Tensor:
     if len(values) != 16 or not all(math.isfinite(float(value)) for value in values):
         raise ValueError("Camera view matrix must contain 16 finite numbers.")
     return torch.tensor(values, dtype=torch.float32, device="cuda").reshape(4, 4)
+
+
+def _load_feature_query(model_id: str, feature: str, count: int) -> torch.Tensor:
+    if feature != "dinov2":
+        raise ValueError("Unknown Gaussian feature type.")
+    key = (model_id, feature)
+    if key not in _feature_queries:
+        path = PAGE_DIR / "assets" / "features" / f"{model_id}-{feature}.npz"
+        if not path.is_file():
+            raise ValueError(f"No {feature} feature model is available for {model_id}.")
+        with np.load(path, allow_pickle=False) as data:
+            colors = data["colors"]
+        if colors.shape != (count, 3):
+            raise ValueError("Feature model does not match the selected Gaussian checkpoint.")
+        query = torch.zeros((count, 160), device="cuda", dtype=torch.float32)
+        query[:, :3] = torch.as_tensor(colors.astype(np.float32) / 255.0, device="cuda")
+        _feature_queries[key] = query
+    return _feature_queries[key]
 
 
 def _edge_aware_smooth_normals(
@@ -217,13 +236,14 @@ def render(payload: dict) -> bytes:
     normal_smoothing = max(0.0, min(2.5, float(payload.get("normalSmoothing", 1.2))))
     mode = payload.get("mode")
     normal_method = payload.get("normalMethod", "depth")
-    if mode not in {"color", "depth", "normal"}:
-        raise ValueError("Mode must be color, depth or normal.")
+    if mode not in {"color", "depth", "normal", "feature-dino"}:
+        raise ValueError("Mode must be color, depth, normal or feature-dino.")
     if normal_method not in {"depth", "gaussian", "hybrid"}:
         raise ValueError("Normal method must be depth, gaussian, or hybrid.")
 
     with _lock, torch.inference_mode():
-        gaussians = _load_gaussians(str(payload.get("modelId", "lego-3000")))
+        model_id = str(payload.get("modelId", "lego-3000"))
+        gaussians = _load_gaussians(model_id)
         color_sh_degree = max(0, min(gaussians["sh_degree"], int(payload.get("shDegree", 2))))
         # Three.js looks down local -Z with +Y up; Uni-GS uses +Z forward and +Y down.
         three_view_transposed = _matrix(payload.get("viewMatrix", []))
@@ -253,6 +273,7 @@ def render(payload: dict) -> bytes:
         empty = gaussians["empty"]
         means = gaussians["means"]
         colors = gaussians["colors"]
+        query = _load_feature_query(model_id, "dinov2", len(means)) if mode == "feature-dino" else gaussians["query"]
         sh = gaussians["sh"] if mode == "color" else empty
         if mode == "color":
             colors = empty
@@ -262,7 +283,7 @@ def render(payload: dict) -> bytes:
             facing_away = (normal_vectors * view_to_camera).sum(dim=1, keepdim=True) < 0
             normal_vectors = torch.where(facing_away, -normal_vectors, normal_vectors)
             colors = (normal_vectors + 1.0) * 0.5
-        rendered, _, _, _, depth, normal, alpha, _ = _RasterizeGaussians.apply(
+        rendered, embedding, _, _, depth, normal, alpha, _ = _RasterizeGaussians.apply(
             means,
             torch.zeros_like(means),
             sh,
@@ -270,13 +291,15 @@ def render(payload: dict) -> bytes:
             gaussians["opacities"],
             gaussians["scales"],
             gaussians["rotations"],
-            gaussians["query"],
+            query,
             empty,
             empty,
             settings,
         )
         valid_t = (alpha > 0.05) & (depth > 0)
-        if mode == "color":
+        if mode == "feature-dino":
+            rgb = embedding[:3].clamp(0, 1).permute(1, 2, 0).cpu().numpy()
+        elif mode == "color":
             rgb = rendered.clamp(0, 1).permute(1, 2, 0).cpu().numpy()
         elif mode == "depth":
             depth_np = depth.cpu().numpy()
