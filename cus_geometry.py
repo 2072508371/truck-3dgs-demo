@@ -60,6 +60,17 @@ def _load_gaussians(model_id: str) -> dict:
     opacities = 1.0 / (1.0 + np.exp(-logits))
     sh0 = columns("f_dc", 3)
     colors = np.maximum(sh0 * 0.28209479177387814 + 0.5, 0.0)
+    rest_names = sorted((name for name in vertex.dtype.names if name.startswith("f_rest_")), key=lambda name: int(name[7:]))
+    rest_count = len(rest_names) // 3
+    sh_degree = min(3, math.isqrt(rest_count + 1) - 1)
+    if rest_count and len(rest_names) != rest_count * 3:
+        raise ValueError("PLY spherical harmonic coefficients are incomplete.")
+    if rest_names:
+        rest = np.stack([vertex[name] for name in rest_names], axis=1).astype(np.float32)
+        rest = rest.reshape(len(vertex), 3, rest_count).transpose(0, 2, 1)
+        sh = np.concatenate((sh0[:, None, :], rest), axis=1).copy()
+    else:
+        sh = sh0[:, None, :].copy()
     device = "cuda"
     means_t = torch.as_tensor(xyz, device=device)
     scales_t = torch.as_tensor(scales, device=device)
@@ -81,6 +92,8 @@ def _load_gaussians(model_id: str) -> dict:
         "gaussian_normals": gaussian_normals,
         "opacities": torch.as_tensor(opacities, device=device),
         "colors": torch.as_tensor(colors, device=device),
+        "sh": torch.as_tensor(sh, device=device),
+        "sh_degree": sh_degree,
         "query": torch.zeros((len(xyz), 160), device=device),
         "empty": torch.empty(0, device=device),
     }
@@ -204,13 +217,14 @@ def render(payload: dict) -> bytes:
     normal_smoothing = max(0.0, min(2.5, float(payload.get("normalSmoothing", 1.2))))
     mode = payload.get("mode")
     normal_method = payload.get("normalMethod", "depth")
-    if mode not in {"depth", "normal"}:
-        raise ValueError("Mode must be depth or normal.")
+    if mode not in {"color", "depth", "normal"}:
+        raise ValueError("Mode must be color, depth or normal.")
     if normal_method not in {"depth", "gaussian", "hybrid"}:
         raise ValueError("Normal method must be depth, gaussian, or hybrid.")
 
     with _lock, torch.inference_mode():
         gaussians = _load_gaussians(str(payload.get("modelId", "lego-3000")))
+        color_sh_degree = max(0, min(gaussians["sh_degree"], int(payload.get("shDegree", 2))))
         # Three.js looks down local -Z with +Y up; Uni-GS uses +Z forward and +Y down.
         three_view_transposed = _matrix(payload.get("viewMatrix", []))
         axis_flip = torch.diag(torch.tensor([1.0, -1.0, -1.0, 1.0], device="cuda"))
@@ -227,11 +241,11 @@ def render(payload: dict) -> bytes:
             image_width=width,
             tanfovx=math.tan(fovx / 2.0),
             tanfovy=math.tan(fovy / 2.0),
-            bg=torch.full((3,), 0.5 if mode == "normal" and normal_method in {"gaussian", "hybrid"} else 1.0, device="cuda"),
+            bg=torch.full((3,), 0.0 if mode == "color" else 0.5 if mode == "normal" and normal_method in {"gaussian", "hybrid"} else 1.0, device="cuda"),
             scale_modifier=1.0,
             viewmatrix=view,
             projmatrix=view @ projection,
-            sh_degree=0,
+            sh_degree=color_sh_degree if mode == "color" else 0,
             campos=torch.tensor(camera_position, dtype=torch.float32, device="cuda"),
             prefiltered=False,
             debug=False,
@@ -239,6 +253,9 @@ def render(payload: dict) -> bytes:
         empty = gaussians["empty"]
         means = gaussians["means"]
         colors = gaussians["colors"]
+        sh = gaussians["sh"] if mode == "color" else empty
+        if mode == "color":
+            colors = empty
         if mode == "normal" and normal_method in {"gaussian", "hybrid"}:
             normal_vectors = gaussians["gaussian_normals"]
             view_to_camera = torch.tensor(camera_position, dtype=torch.float32, device="cuda") - means
@@ -248,7 +265,7 @@ def render(payload: dict) -> bytes:
         rendered, _, _, _, depth, normal, alpha, _ = _RasterizeGaussians.apply(
             means,
             torch.zeros_like(means),
-            empty,
+            sh,
             colors,
             gaussians["opacities"],
             gaussians["scales"],
@@ -259,7 +276,9 @@ def render(payload: dict) -> bytes:
             settings,
         )
         valid_t = (alpha > 0.05) & (depth > 0)
-        if mode == "depth":
+        if mode == "color":
+            rgb = rendered.clamp(0, 1).permute(1, 2, 0).cpu().numpy()
+        elif mode == "depth":
             depth_np = depth.cpu().numpy()
             valid = valid_t.cpu().numpy()
             if valid.any():

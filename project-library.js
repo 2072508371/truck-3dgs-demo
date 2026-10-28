@@ -32,22 +32,22 @@ async function api(path, options) {
 }
 
 function setRenderMode(mode) {
-  if (!['color', 'depth', 'normal', 'gaussians'].includes(mode)) return;
+  if (!['color', 'cus-color', 'depth', 'normal', 'gaussians'].includes(mode)) return;
   selectedRenderMode = mode;
   document.querySelectorAll('[data-render-mode]').forEach(button => {
     button.setAttribute('aria-pressed', String(button.dataset.renderMode === mode));
   });
   renderStatus.textContent = mode === 'normal'
     ? (isLocalApp ? '正在计算本机 CUS-GS 法向图…' : '浏览器 GPU 近似法向图；可随相机实时转动')
-    : mode === 'depth' ? '浏览器 GPU 实时深度图' : mode === 'gaussians' ? '原始 Gaussian 参数的三维椭球抽样展示' : '交互彩色渲染';
+    : mode === 'depth' ? '浏览器 GPU 实时深度图' : mode === 'gaussians' ? '原始 Gaussian 参数的三维椭球抽样展示' : mode === 'cus-color' ? 'CUS-GS CUDA 正在按当前视角渲染彩色图…' : '交互彩色渲染';
   viewerFrame.contentWindow?.postMessage({ type: '3dgs-render-mode', mode }, location.origin);
 }
 
 window.addEventListener('message', event => {
   if (event.origin !== location.origin || event.source !== viewerFrame.contentWindow) return;
   if (event.data?.type === '3dgs-viewer-ready') setRenderMode(selectedRenderMode);
-  if (event.data?.type === '3dgs-geometry-progress') renderStatus.textContent = '正在按当前相机重新计算 CUS-GS 几何图…';
-  if (event.data?.type === '3dgs-geometry-rendered') renderStatus.textContent = 'CUS-GS CUDA 几何图已同步到当前相机';
+  if (event.data?.type === '3dgs-geometry-progress') renderStatus.textContent = event.data.mode === 'cus-color' ? '正在按当前相机渲染 CUS-GS 彩色图…' : '正在按当前相机重新计算 CUS-GS 法向图…';
+  if (event.data?.type === '3dgs-geometry-rendered') renderStatus.textContent = event.data.mode === 'cus-color' ? 'CUS-GS CUDA 彩色图已同步到当前相机' : 'CUS-GS CUDA 法向图已同步到当前相机';
   if (event.data?.type === '3dgs-geometry-error') {
     setRenderMode('color');
     renderStatus.textContent = `实时深度/法向不可用：${event.data.message}`;
@@ -63,6 +63,7 @@ document.querySelectorAll('[data-render-mode]').forEach(button => {
   button.addEventListener('click', () => setRenderMode(button.dataset.renderMode));
 });
 if (!isLocalApp) document.getElementById('open-library').hidden = true;
+document.querySelector('[data-render-mode="cus-color"]').hidden = !isLocalApp;
 if (!isLocalApp) renderStatus.textContent = '公开页面支持浏览器 GPU 法向估计；本机 CUDA 法向需要本地服务';
 
 function qualityOf(file) {

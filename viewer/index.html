@@ -106,7 +106,7 @@
         <div class="side-head"><h2>Scene controls</h2><span class="tag">PLY · 3DGS</span></div>
         <div class="field"><div class="label-row"><label>Camera position</label></div><div class="vec"><input id="px" type="number" step="0.1" value="0"><input id="py" type="number" step="0.1" value="4.2"><input id="pz" type="number" step="0.1" value="1.5"></div></div>
         <div class="field"><div class="label-row"><label>Camera look-at</label></div><div class="vec"><input id="tx" type="number" step="0.1" value="0"><input id="ty" type="number" step="0.1" value="0"><input id="tz" type="number" step="0.1" value="0"></div></div>
-    <div class="field" id="render-mode-field"><div class="label-row"><label for="render-mode">渲染模式</label></div><select class="mode-select" id="render-mode"><option value="color">彩色外观</option><option value="depth">GPU 实时深度图</option><option value="normal">CUS-GS 法向图</option><option value="gaussians">高斯球 · 原始形状</option></select><div class="mode-note" id="mode-note">原始 Gaussian 颜色与透明度</div></div>
+    <div class="field" id="render-mode-field"><div class="label-row"><label for="render-mode">渲染模式</label></div><select class="mode-select" id="render-mode"><option value="color">彩色外观</option><option value="cus-color">CUS-GS CUDA 彩色（本机）</option><option value="depth">GPU 实时深度图</option><option value="normal">CUS-GS 法向图</option><option value="gaussians">高斯球 · 原始形状</option></select><div class="mode-note" id="mode-note">原始 Gaussian 颜色与透明度</div></div>
         <section class="tuning-group" aria-label="渲染参数">
           <h3>渲染参数</h3>
           <div class="tuning-control" id="depth-tuning" hidden>
@@ -136,12 +136,12 @@
           <label class="toggle-row" for="antialias"><span>抗锯齿</span><input id="antialias" type="checkbox" checked></label>
           </div>
           <div class="tuning-control" id="geometry-resolution-control">
-            <label class="tuning-label" for="geometry-resolution"><span>静止法向图分辨率上限</span><output id="geometry-resolution-value">768 px</output></label>
+            <label class="tuning-label" for="geometry-resolution"><span>静止 CUDA 图像分辨率上限</span><output id="geometry-resolution-value">768 px</output></label>
             <input id="geometry-resolution" type="range" min="256" max="768" step="128" value="768">
             <div class="mode-note">拖动相机时临时限制为 256 px；停止后按此上限精细更新。</div>
           </div>
           <div class="tuning-control" id="geometry-fps-control">
-            <label class="tuning-label" for="geometry-fps"><span>交互法向更新上限</span><output id="geometry-fps-value">12 fps</output></label>
+            <label class="tuning-label" for="geometry-fps"><span>交互 CUDA 更新上限</span><output id="geometry-fps-value">12 fps</output></label>
             <input id="geometry-fps" type="range" min="5" max="20" step="1" value="12">
           </div>
           <div class="tuning-control" id="normal-contrast-control" hidden>
@@ -205,6 +205,7 @@
     const embedded = new URLSearchParams(location.search).get('embedded') === '1';
     if (embedded) document.getElementById('render-mode-field').hidden = true;
     const hasLocalGeometryService = ['localhost', '127.0.0.1'].includes(location.hostname);
+    document.querySelector('#render-mode option[value="cus-color"]').hidden = !hasLocalGeometryService;
     if (sceneName) {
       document.querySelector('.scene-title h1').textContent = sceneName;
       document.querySelector('.head-right .hint-top').textContent = demoId.startsWith('chair-') || demoId.startsWith('drums-') || demoId.startsWith('lego-') ? `Synthetic NeRF · ${Number(sceneIterations || 3000).toLocaleString()} iterations` : 'Custom photo reconstruction';
@@ -239,8 +240,10 @@
     let lastGeometryMode;
     const geometryOverlay = document.getElementById('geometry-overlay');
     const browserNormal = () => !supportsCusGeometry;
+    const isCudaMode = mode => mode === 'cus-color' || (mode === 'normal' && !browserNormal());
     const modeNotes = {
       color: '原始 Gaussian 颜色与透明度',
+      'cus-color': '本机 CUS-GS CUDA 光栅器；同一份 PLY、当前相机，支持球谐彩色输出',
       depth: '浏览器 WebGL GPU 实时深度着色；随相机连续更新',
       normal: browserNormal() ? '浏览器 GPU 协方差短轴法向估计；随相机实时更新，未经真实法向基准验证' : 'CUS-GS CUDA 法向图；可切换深度、短轴或融合算法',
       gaussians: '原始 PLY 的三维 Gaussian 椭球抽样；线框显示真实缩放和旋转'
@@ -367,11 +370,11 @@
     }
 
     function setRenderMode(mode) {
-      if (!['color', 'depth', 'normal', 'gaussians'].includes(mode)) return;
+      if (!['color', 'cus-color', 'depth', 'normal', 'gaussians'].includes(mode)) return;
       if (mode !== renderMode) {
         geometryRequestId++;
         clearTimeout(geometryTimer);
-        if (mode === 'color') geometryPending = false;
+        geometryPending = false;
       }
       renderMode = mode;
       document.getElementById('mode-note').textContent = mode === 'normal' && browserNormal()
@@ -386,19 +389,24 @@
       document.getElementById('normal-contrast-control').hidden = mode !== 'normal';
       document.getElementById('normal-method-control').hidden = mode !== 'normal' || browserNormal();
       document.getElementById('normal-smoothing-control').hidden = mode !== 'normal' || browserNormal();
-      document.getElementById('geometry-resolution-control').hidden = mode !== 'normal' || browserNormal();
-      document.getElementById('geometry-fps-control').hidden = mode !== 'normal' || browserNormal();
+      document.getElementById('geometry-resolution-control').hidden = !isCudaMode(mode);
+      document.getElementById('geometry-fps-control').hidden = !isCudaMode(mode);
       document.getElementById('viewer-renderer-controls').hidden = mode === 'normal' || mode === 'gaussians';
-      document.getElementById('alpha-control').hidden = mode === 'normal';
+      document.getElementById('alpha-control').hidden = mode === 'normal' || mode === 'cus-color';
       document.querySelector('.stage').classList.toggle('depth-mode', mode === 'depth');
       document.querySelector('.stage').classList.toggle('normal-mode', mode === 'normal');
-      geometryOverlay.hidden = mode !== 'normal' || browserNormal();
+      geometryOverlay.hidden = true;
       if (viewer) {
-        if (viewer.renderer?.domElement) viewer.renderer.domElement.style.opacity = mode === 'normal' && !browserNormal() ? '0' : '1';
+        if (viewer.renderer?.domElement) viewer.renderer.domElement.style.opacity = '1';
         const installed = installRenderModes(viewer);
         updateEllipsoidPreview(viewer);
         if (mode === 'color') setStatus('彩色渲染已就绪');
         if (mode === 'depth') setStatus('浏览器 GPU 深度渲染已就绪');
+        if (mode === 'cus-color') {
+          if (lastGeometryMode !== mode) geometryOverlay.removeAttribute('src');
+          lastGeometryMode = mode;
+          queueGeometryRender(0);
+        }
         if (mode === 'normal') {
           if (parent !== window) parent.postMessage({ type: '3dgs-normal-source', source: browserNormal() ? 'browser' : 'cus' }, location.origin);
           if (browserNormal()) setStatus(installed ? '浏览器 GPU 法向渲染已就绪' : '此模型的浏览器法向着色器不可用');
@@ -412,7 +420,7 @@
     }
 
     function queueGeometryRender(delay = 0) {
-      if (!viewer || renderMode !== 'normal' || browserNormal()) return;
+      if (!viewer || !isCudaMode(renderMode)) return;
       clearTimeout(geometryTimer);
       const updateInterval = 1000 / Number(document.getElementById('geometry-fps').value);
       const throttle = Math.max(0, (isInteracting ? updateInterval : 250) - (performance.now() - geometryLastStartedAt));
@@ -426,7 +434,7 @@
     }
 
     async function renderGeometry() {
-      if (!viewer || renderMode !== 'normal' || browserNormal()) return;
+      if (!viewer || !isCudaMode(renderMode)) return;
       if (geometryInFlight) {
         geometryPending = true;
         return;
@@ -444,15 +452,15 @@
       const width = Math.max(128, Math.round(bounds.width * scale));
       const height = Math.max(128, Math.round(bounds.height * scale));
       const focusDistance = camera.position.distanceTo(viewer.controls?.target || camera.position);
-      setStatus('CUS-GS 正在按当前视角计算几何图…');
-      if (parent !== window) parent.postMessage({ type: '3dgs-geometry-progress' }, location.origin);
+      setStatus(requestedMode === 'cus-color' ? 'CUS-GS 正在按当前视角渲染彩色图…' : 'CUS-GS 正在按当前视角计算法向图…');
+      if (parent !== window) parent.postMessage({ type: '3dgs-geometry-progress', mode: requestedMode }, location.origin);
       try {
         if (!supportsCusGeometry) throw new Error('CUS-GS 实时几何渲染目前仅支持内置训练检查点。');
         const response = await fetch('/api/geometry/render', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            mode: requestedMode,
+            mode: requestedMode === 'cus-color' ? 'color' : requestedMode,
             modelId: demoId,
             viewMatrix: Array.from(camera.matrixWorldInverse.elements),
             cameraPosition: camera.position.toArray(),
@@ -463,6 +471,7 @@
             normalContrast: Number(document.getElementById('normal-contrast').value),
             normalSmoothing: Number(document.getElementById('normal-smoothing').value),
             normalMethod,
+            shDegree: Number(document.getElementById('sh-degree').value),
           })
         });
         if (!response.ok) {
@@ -477,9 +486,11 @@
         if (geometryObjectUrl) URL.revokeObjectURL(geometryObjectUrl);
         geometryObjectUrl = blobUrl;
         geometryOverlay.src = blobUrl;
-        geometryOverlay.alt = requestedMode === 'depth' ? 'CUS-GS per-pixel depth at the current interactive camera' : normalMethod === 'gaussian' ? 'Camera-facing Gaussian covariance normals at the current interactive camera' : normalMethod === 'hybrid' ? 'Blended Gaussian covariance and depth-derived normals at the current interactive camera' : 'CUS-GS depth-backprojected normal at the current interactive camera';
-        setStatus('CUS-GS 几何图已更新');
-        if (parent !== window) parent.postMessage({ type: '3dgs-geometry-rendered' }, location.origin);
+        geometryOverlay.alt = requestedMode === 'cus-color' ? 'CUS-GS CUDA color rasterization at the current interactive camera' : normalMethod === 'gaussian' ? 'Camera-facing Gaussian covariance normals at the current interactive camera' : normalMethod === 'hybrid' ? 'Blended Gaussian covariance and depth-derived normals at the current interactive camera' : 'CUS-GS depth-backprojected normal at the current interactive camera';
+        geometryOverlay.hidden = false;
+        if (viewer.renderer?.domElement) viewer.renderer.domElement.style.opacity = '0';
+        setStatus(requestedMode === 'cus-color' ? 'CUS-GS 彩色图已更新' : 'CUS-GS 法向图已更新');
+        if (parent !== window) parent.postMessage({ type: '3dgs-geometry-rendered', mode: requestedMode }, location.origin);
       } catch (error) {
         if (requestId !== geometryRequestId || renderMode !== requestedMode) return;
         geometryOverlay.hidden = true;
@@ -491,7 +502,7 @@
         setStatus(`几何渲染不可用：${error.message}`);
       } finally {
         geometryInFlight = false;
-        if (geometryPending && renderMode === 'normal') {
+        if (geometryPending && isCudaMode(renderMode)) {
           geometryPending = false;
           queueGeometryRender(0);
         }
@@ -618,8 +629,8 @@
         applySphericalHarmonicsDegree(activeViewer);
         installRenderModes(activeViewer);
         updateEllipsoidPreview(activeViewer);
-        if (activeViewer.renderer?.domElement) activeViewer.renderer.domElement.style.opacity = renderMode === 'normal' && !browserNormal() ? '0' : '1';
-        geometryOverlay.hidden = renderMode !== 'normal' || browserNormal();
+        if (activeViewer.renderer?.domElement) activeViewer.renderer.domElement.style.opacity = '1';
+        geometryOverlay.hidden = true;
         activeViewer.start();
         activeViewer.controls?.addEventListener('start', () => {
           isInteracting = true;
@@ -628,7 +639,7 @@
         });
         activeViewer.controls?.addEventListener('end', () => {
           isInteracting = false;
-          if (renderMode === 'normal') {
+          if (isCudaMode(renderMode)) {
             queueGeometryRender(0);
           }
         });
@@ -637,7 +648,7 @@
           else queueGeometryRender();
         });
         if (window.ResizeObserver) new ResizeObserver(() => queueGeometryRender(100)).observe(container);
-        if (renderMode === 'normal') queueGeometryRender(0);
+        if (isCudaMode(renderMode)) queueGeometryRender(0);
         if (renderMode !== 'gaussians') setStatus('场景已就绪');
         if (parent !== window) parent.postMessage({ type: '3dgs-viewer-ready' }, location.origin);
       }).catch(error => {
@@ -663,6 +674,7 @@
       persistRendererSettings();
       try {
         applySphericalHarmonicsDegree(viewer);
+        if (renderMode === 'cus-color') queueGeometryRender(0);
       } catch (error) {
         console.error(error);
         setStatus(`球谐阶数切换失败：${error?.message || '查看器未就绪'}`);
@@ -696,7 +708,7 @@
     });
     window.addEventListener('message', event => {
       if (event.source !== parent || event.origin !== location.origin) return;
-      if (event.data?.type === '3dgs-render-mode' && ['color', 'depth', 'normal', 'gaussians'].includes(event.data.mode)) {
+      if (event.data?.type === '3dgs-render-mode' && ['color', 'cus-color', 'depth', 'normal', 'gaussians'].includes(event.data.mode)) {
         document.getElementById('render-mode').value = event.data.mode;
         setRenderMode(event.data.mode);
       }

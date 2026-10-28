@@ -42,6 +42,8 @@ The browser draws color, depth, and approximate Gaussian covariance normals dire
 
 The **Gaussian ellipsoids** switch in the viewer draws an instanced wireframe preview from each selected model's stored center, scale, rotation, and color. It defaults to a deterministic sample of 2,500 splats at a radius of two standard deviations; the sample count and radius are adjustable in the viewer. This preview shows the original 3D ellipsoid geometry, while the color mode uses the usual alpha-blended splat renderer. Sampling changes only the preview, not the PLY file.
 
+On the local project server, **CUS-GS color** sends the current camera and selected built-in PLY to the CUDA rasterizer in `../CUS-GS-uni-gs-test/diff-gaussian-rasterization`. It reads the PLY spherical harmonic coefficients (up to the chosen degree) and returns a PNG for comparison with the browser color mode. This requires the configured local CUDA environment and is not available on static GitHub Pages. The wireframe ellipsoid mode remains a separate browser visualization because the CUS-GS rasterizer outputs a 2D splat image, not 3D ellipsoid meshes.
+
 The recommended local normal mode follows the UniGS depth-to-normal idea: it backprojects rendered depth, computes camera-facing normals at multiple pixel steps, rejects low-opacity/depth-discontinuity neighborhoods, and fuses trusted estimates before edge-aware smoothing. The optional hybrid and Gaussian-axis modes remain available for comparison. These are rendering improvements for existing RGB-trained checkpoints, not a substitute for UniGS depth/normal-supervised training; 3,000-iteration models can still have noisy or incomplete geometry.
 
 ## Sharing with classmates
