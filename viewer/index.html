@@ -233,7 +233,7 @@
     const modeNotes = {
       color: '原始 Gaussian 颜色与透明度',
       depth: '浏览器 WebGL GPU 实时深度着色；随相机连续更新',
-      normal: browserNormal() ? '浏览器 GPU 协方差法向估计；随相机实时更新，精度低于本机 CUDA 深度法向' : 'CUS-GS CUDA 深度反投影法向；随当前相机重新渲染'
+      normal: browserNormal() ? '浏览器 GPU 协方差短轴法向估计；随相机实时更新，未经真实法向基准验证' : 'CUS-GS CUDA 法向图；可切换深度、短轴或融合算法'
     };
 
     function installRenderModes(activeViewer) {
@@ -303,7 +303,7 @@
       }
       renderMode = mode;
       document.getElementById('mode-note').textContent = mode === 'normal' && browserNormal()
-        ? '浏览器 GPU 协方差法向估计；随相机实时更新，精度低于本机 CUDA 深度法向'
+        ? '浏览器 GPU 协方差短轴法向估计；随相机实时更新，未经真实法向基准验证'
         : modeNotes[mode];
       document.getElementById('depth-tuning').hidden = mode !== 'depth';
       document.getElementById('depth-note').hidden = !['depth', 'normal'].includes(mode);
