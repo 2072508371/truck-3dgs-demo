@@ -106,7 +106,7 @@
         <div class="side-head"><h2>Scene controls</h2><span class="tag">PLY · 3DGS</span></div>
         <div class="field"><div class="label-row"><label>Camera position</label></div><div class="vec"><input id="px" type="number" step="0.1" value="0"><input id="py" type="number" step="0.1" value="4.2"><input id="pz" type="number" step="0.1" value="1.5"></div></div>
         <div class="field"><div class="label-row"><label>Camera look-at</label></div><div class="vec"><input id="tx" type="number" step="0.1" value="0"><input id="ty" type="number" step="0.1" value="0"><input id="tz" type="number" step="0.1" value="0"></div></div>
-    <div class="field" id="render-mode-field"><div class="label-row"><label for="render-mode">渲染模式</label></div><select class="mode-select" id="render-mode"><option value="color">彩色外观</option><option value="depth">GPU 实时深度图</option><option value="normal">CUS-GS 法向图</option></select><div class="mode-note" id="mode-note">原始 Gaussian 颜色与透明度</div></div>
+    <div class="field" id="render-mode-field"><div class="label-row"><label for="render-mode">渲染模式</label></div><select class="mode-select" id="render-mode"><option value="color">彩色外观</option><option value="depth">GPU 实时深度图</option><option value="normal">CUS-GS 法向图</option><option value="gaussians">高斯球 · 原始形状</option></select><div class="mode-note" id="mode-note">原始 Gaussian 颜色与透明度</div></div>
         <section class="tuning-group" aria-label="渲染参数">
           <h3>渲染参数</h3>
           <div class="tuning-control" id="depth-tuning" hidden>
@@ -116,6 +116,13 @@
             <input id="depth-far" type="range" min="0.5" max="6" step="0.1" value="1.3">
           </div>
           <div class="mode-note" id="depth-note" hidden>深度图由浏览器 GPU 实时绘制；法向图根据运行环境选择浏览器或本机 CUDA。</div>
+          <div class="tuning-control" id="ellipsoid-controls" hidden>
+            <label class="tuning-label" for="ellipsoid-count"><span>显示高斯球数量</span><output id="ellipsoid-count-value">2,500</output></label>
+            <input id="ellipsoid-count" type="range" min="500" max="8000" step="500" value="2500">
+            <label class="tuning-label" for="ellipsoid-radius"><span>椭球半径 · 标准差</span><output id="ellipsoid-radius-value">2.0σ</output></label>
+            <input id="ellipsoid-radius" type="range" min="0.5" max="4" step="0.25" value="2">
+            <div class="mode-note">从当前 PLY 抽样；线框椭球按原始中心、缩放、旋转和颜色绘制。抽样只影响展示，不修改模型。</div>
+          </div>
         </section>
         <section class="tuning-group" aria-label="渲染器设置">
           <h3>渲染器设置</h3>
@@ -152,7 +159,7 @@
             <div class="mode-note">抑制表面深度抖动；按深度边缘加权，尽量保留物体轮廓。0 为关闭。</div>
           </div>
         </section>
-        <div class="field" id="alpha-control"><div class="label-row"><label for="alpha">最小透明度阈值</label><span id="alpha-value">1 / 255</span></div><input id="alpha" type="range" min="0" max="30" value="1"><div class="mode-note">仅对彩色/深度查看器生效；重新载入 Gaussian 时剔除低于该值的 splat。</div></div>
+        <div class="field" id="alpha-control"><div class="label-row"><label for="alpha">最小透明度阈值</label><span id="alpha-value">1 / 255</span></div><input id="alpha" type="range" min="0" max="30" value="1"><div class="mode-note">重新载入模型后，彩色、浏览器深度/法向和高斯球模式都会剔除低于该值的 splat。</div></div>
         <div class="side-buttons"><button class="secondary" id="apply-camera">应用视角</button><button class="primary" id="load-file">加载 PLY</button><input class="file-input" id="file-picker" type="file" accept=".ply,.splat,.ksplat"></div>
         <div class="side-buttons"><button class="secondary" id="save-view">保存视角</button><button class="secondary" id="restore-view">恢复视角</button></div>
         <div class="side-buttons"><button class="secondary" id="export-ksplat">导出 KSPLAT</button></div>
@@ -220,6 +227,8 @@
     let localModelUrl;
     let debugVisible = false;
     let renderMode = 'color';
+    let ellipsoidMesh;
+    let ellipsoidViewer;
     let geometryTimer;
     let geometryRequestId = 0;
     let geometryObjectUrl;
@@ -233,8 +242,71 @@
     const modeNotes = {
       color: '原始 Gaussian 颜色与透明度',
       depth: '浏览器 WebGL GPU 实时深度着色；随相机连续更新',
-      normal: browserNormal() ? '浏览器 GPU 协方差短轴法向估计；随相机实时更新，未经真实法向基准验证' : 'CUS-GS CUDA 法向图；可切换深度、短轴或融合算法'
+      normal: browserNormal() ? '浏览器 GPU 协方差短轴法向估计；随相机实时更新，未经真实法向基准验证' : 'CUS-GS CUDA 法向图；可切换深度、短轴或融合算法',
+      gaussians: '原始 PLY 的三维 Gaussian 椭球抽样；线框显示真实缩放和旋转'
     };
+
+    function removeEllipsoidPreview() {
+      if (!ellipsoidMesh) return;
+      ellipsoidViewer?.threeScene?.remove(ellipsoidMesh);
+      ellipsoidMesh.geometry.dispose();
+      ellipsoidMesh.material.dispose();
+      ellipsoidMesh = undefined;
+      ellipsoidViewer = undefined;
+    }
+
+    function buildEllipsoidPreview(activeViewer) {
+      removeEllipsoidPreview();
+      const splats = activeViewer?.splatMesh;
+      const total = splats?.getSplatCount() || 0;
+      if (!total || !activeViewer.threeScene) return false;
+      const limit = Math.min(total, Number(document.getElementById('ellipsoid-count').value));
+      const radius = Number(document.getElementById('ellipsoid-radius').value);
+      const geometry = new THREE.SphereGeometry(1, 8, 6);
+      const material = new THREE.MeshBasicMaterial({ wireframe: true, transparent: true, opacity: 0.8, depthWrite: false });
+      const preview = new THREE.InstancedMesh(geometry, material, limit);
+      const center = new THREE.Vector3();
+      const scale = new THREE.Vector3();
+      const rotation = new THREE.Quaternion();
+      const rgba = new THREE.Vector4();
+      const dummy = new THREE.Object3D();
+      const color = new THREE.Color();
+      let displayed = 0;
+      for (let i = 0; i < limit; i++) {
+        const index = Math.floor((i + 0.5) * total / limit);
+        splats.getSplatCenter(index, center);
+        splats.getSplatScaleAndRotation(index, scale, rotation);
+        splats.getSplatColor(index, rgba);
+        if (![center.x, center.y, center.z, scale.x, scale.y, scale.z, rotation.x, rotation.y, rotation.z, rotation.w].every(Number.isFinite)) continue;
+        if (Math.min(scale.x, scale.y, scale.z) <= 0 || rgba.w < 1) continue;
+        dummy.position.copy(center);
+        dummy.quaternion.copy(rotation);
+        dummy.scale.copy(scale).multiplyScalar(radius);
+        dummy.updateMatrix();
+        preview.setMatrixAt(displayed, dummy.matrix);
+        color.setRGB(rgba.x / 255, rgba.y / 255, rgba.z / 255);
+        preview.setColorAt(displayed, color);
+        displayed++;
+      }
+      preview.count = displayed;
+      preview.instanceMatrix.needsUpdate = true;
+      if (preview.instanceColor) preview.instanceColor.needsUpdate = true;
+      preview.frustumCulled = false;
+      activeViewer.threeScene.add(preview);
+      ellipsoidMesh = preview;
+      ellipsoidViewer = activeViewer;
+      activeViewer.forceRenderNextFrame();
+      setStatus(`显示 ${displayed.toLocaleString()} / ${total.toLocaleString()} 个 Gaussian 椭球`);
+      return true;
+    }
+
+    function updateEllipsoidPreview(activeViewer) {
+      if (!activeViewer?.splatMesh) return;
+      activeViewer.splatMesh.visible = renderMode !== 'gaussians';
+      if (renderMode === 'gaussians' && (!ellipsoidMesh || ellipsoidViewer !== activeViewer)) buildEllipsoidPreview(activeViewer);
+      if (ellipsoidMesh) ellipsoidMesh.visible = renderMode === 'gaussians';
+      activeViewer.forceRenderNextFrame();
+    }
 
     function installRenderModes(activeViewer) {
       const material = activeViewer?.splatMesh?.material;
@@ -295,7 +367,7 @@
     }
 
     function setRenderMode(mode) {
-      if (!['color', 'depth', 'normal'].includes(mode)) return;
+      if (!['color', 'depth', 'normal', 'gaussians'].includes(mode)) return;
       if (mode !== renderMode) {
         geometryRequestId++;
         clearTimeout(geometryTimer);
@@ -307,6 +379,7 @@
         : modeNotes[mode];
       document.getElementById('depth-tuning').hidden = mode !== 'depth';
       document.getElementById('depth-note').hidden = !['depth', 'normal'].includes(mode);
+      document.getElementById('ellipsoid-controls').hidden = mode !== 'gaussians';
       document.getElementById('depth-note').textContent = browserNormal()
         ? '深度图与近似法向图均在浏览器 GPU 实时绘制；此模型没有经过真实法向监督。'
         : '深度图由浏览器 GPU 实时绘制；法向图使用本机 CUS-GS CUDA 光栅器。';
@@ -315,7 +388,7 @@
       document.getElementById('normal-smoothing-control').hidden = mode !== 'normal' || browserNormal();
       document.getElementById('geometry-resolution-control').hidden = mode !== 'normal' || browserNormal();
       document.getElementById('geometry-fps-control').hidden = mode !== 'normal' || browserNormal();
-      document.getElementById('viewer-renderer-controls').hidden = mode === 'normal';
+      document.getElementById('viewer-renderer-controls').hidden = mode === 'normal' || mode === 'gaussians';
       document.getElementById('alpha-control').hidden = mode === 'normal';
       document.querySelector('.stage').classList.toggle('depth-mode', mode === 'depth');
       document.querySelector('.stage').classList.toggle('normal-mode', mode === 'normal');
@@ -323,6 +396,8 @@
       if (viewer) {
         if (viewer.renderer?.domElement) viewer.renderer.domElement.style.opacity = mode === 'normal' && !browserNormal() ? '0' : '1';
         const installed = installRenderModes(viewer);
+        updateEllipsoidPreview(viewer);
+        if (mode === 'color') setStatus('彩色渲染已就绪');
         if (mode === 'depth') setStatus('浏览器 GPU 深度渲染已就绪');
         if (mode === 'normal') {
           if (parent !== window) parent.postMessage({ type: '3dgs-normal-source', source: browserNormal() ? 'browser' : 'cus' }, location.origin);
@@ -514,6 +589,7 @@
       const generation = ++viewerGeneration;
       const previousViewer = viewer;
       viewer = undefined;
+      removeEllipsoidPreview();
       if (previousViewer) await disposeViewerInstance(previousViewer);
       if (generation !== viewerGeneration) return;
       container.replaceChildren();
@@ -541,6 +617,7 @@
         document.getElementById('offline-notice').hidden = true;
         applySphericalHarmonicsDegree(activeViewer);
         installRenderModes(activeViewer);
+        updateEllipsoidPreview(activeViewer);
         if (activeViewer.renderer?.domElement) activeViewer.renderer.domElement.style.opacity = renderMode === 'normal' && !browserNormal() ? '0' : '1';
         geometryOverlay.hidden = renderMode !== 'normal' || browserNormal();
         activeViewer.start();
@@ -561,7 +638,7 @@
         });
         if (window.ResizeObserver) new ResizeObserver(() => queueGeometryRender(100)).observe(container);
         if (renderMode === 'normal') queueGeometryRender(0);
-        setStatus('场景已就绪');
+        if (renderMode !== 'gaussians') setStatus('场景已就绪');
         if (parent !== window) parent.postMessage({ type: '3dgs-viewer-ready' }, location.origin);
       }).catch(error => {
         if (generation !== viewerGeneration || viewer !== activeViewer) return;
@@ -576,6 +653,11 @@
     buildViewer(initialPosition, initialLookAt, Number(document.getElementById('alpha').value));
     document.getElementById('apply-camera').addEventListener('click', () => applyCamera(values(['px','py','pz']), values(['tx','ty','tz'])));
     document.getElementById('render-mode').addEventListener('change', event => setRenderMode(event.target.value));
+    ['ellipsoid-count', 'ellipsoid-radius'].forEach(id => document.getElementById(id).addEventListener('input', () => {
+      document.getElementById('ellipsoid-count-value').value = Number(document.getElementById('ellipsoid-count').value).toLocaleString();
+      document.getElementById('ellipsoid-radius-value').value = `${Number(document.getElementById('ellipsoid-radius').value).toFixed(1)}σ`;
+      if (renderMode === 'gaussians' && viewer?.splatMesh?.getSplatCount()) buildEllipsoidPreview(viewer);
+    }));
     ['depth-near', 'depth-far'].forEach(id => document.getElementById(id).addEventListener('input', updateTuning));
     document.getElementById('sh-degree').addEventListener('change', () => {
       persistRendererSettings();
@@ -614,7 +696,7 @@
     });
     window.addEventListener('message', event => {
       if (event.source !== parent || event.origin !== location.origin) return;
-      if (event.data?.type === '3dgs-render-mode' && ['color', 'depth', 'normal'].includes(event.data.mode)) {
+      if (event.data?.type === '3dgs-render-mode' && ['color', 'depth', 'normal', 'gaussians'].includes(event.data.mode)) {
         document.getElementById('render-mode').value = event.data.mode;
         setRenderMode(event.data.mode);
       }
@@ -688,6 +770,7 @@
       const generation = ++viewerGeneration;
       const previousViewer = viewer;
       viewer = undefined;
+      removeEllipsoidPreview();
       if (previousViewer) await disposeViewerInstance(previousViewer);
       if (generation !== viewerGeneration) return;
       container.replaceChildren();
@@ -696,7 +779,7 @@
       supportsCusGeometry = false;
       document.querySelector('#render-mode option[value="normal"]').textContent = '浏览器 GPU 法向估计';
       const activeViewer = viewer;
-      activeViewer.addSplatScene(localUrl, { showLoadingUI:false, progressiveLoad:false }).then(() => { if (generation !== viewerGeneration || viewer !== activeViewer) return; applySphericalHarmonicsDegree(activeViewer); installRenderModes(activeViewer); if (activeViewer.renderer?.domElement) activeViewer.renderer.domElement.style.opacity = '1'; geometryOverlay.hidden = true; activeViewer.start(); activeViewer.controls?.addEventListener('start', () => { isInteracting = true; clearTimeout(geometryTimer); geometryPending = false; }); activeViewer.controls?.addEventListener('end', () => { isInteracting = false; if (renderMode === 'normal') queueGeometryRender(0); }); activeViewer.controls?.addEventListener('change', () => { if (renderMode === 'depth' || renderMode === 'normal') installRenderModes(activeViewer); else queueGeometryRender(); }); if (window.ResizeObserver) new ResizeObserver(() => queueGeometryRender(100)).observe(container); setStatus(`已载入 ${file.name}`); if (parent !== window) parent.postMessage({ type: '3dgs-viewer-ready' }, location.origin); }).catch(error => { if (generation !== viewerGeneration || viewer !== activeViewer) return; console.error(error); setStatus('文件载入失败'); URL.revokeObjectURL(localUrl); });
+      activeViewer.addSplatScene(localUrl, { showLoadingUI:false, progressiveLoad:false }).then(() => { if (generation !== viewerGeneration || viewer !== activeViewer) return; applySphericalHarmonicsDegree(activeViewer); installRenderModes(activeViewer); updateEllipsoidPreview(activeViewer); if (activeViewer.renderer?.domElement) activeViewer.renderer.domElement.style.opacity = '1'; geometryOverlay.hidden = true; activeViewer.start(); activeViewer.controls?.addEventListener('start', () => { isInteracting = true; clearTimeout(geometryTimer); geometryPending = false; }); activeViewer.controls?.addEventListener('end', () => { isInteracting = false; if (renderMode === 'normal') queueGeometryRender(0); }); activeViewer.controls?.addEventListener('change', () => { if (renderMode === 'depth' || renderMode === 'normal') installRenderModes(activeViewer); else queueGeometryRender(); }); if (window.ResizeObserver) new ResizeObserver(() => queueGeometryRender(100)).observe(container); if (renderMode !== 'gaussians') setStatus(`已载入 ${file.name}`); if (parent !== window) parent.postMessage({ type: '3dgs-viewer-ready' }, location.origin); }).catch(error => { if (generation !== viewerGeneration || viewer !== activeViewer) return; console.error(error); setStatus('文件载入失败'); URL.revokeObjectURL(localUrl); });
     });
   </script>
 </body>

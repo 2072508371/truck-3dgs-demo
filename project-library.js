@@ -32,14 +32,14 @@ async function api(path, options) {
 }
 
 function setRenderMode(mode) {
-  if (!['color', 'depth', 'normal'].includes(mode)) return;
+  if (!['color', 'depth', 'normal', 'gaussians'].includes(mode)) return;
   selectedRenderMode = mode;
   document.querySelectorAll('[data-render-mode]').forEach(button => {
     button.setAttribute('aria-pressed', String(button.dataset.renderMode === mode));
   });
   renderStatus.textContent = mode === 'normal'
     ? (isLocalApp ? '正在计算本机 CUS-GS 法向图…' : '浏览器 GPU 近似法向图；可随相机实时转动')
-    : mode === 'depth' ? '浏览器 GPU 实时深度图' : '交互彩色渲染';
+    : mode === 'depth' ? '浏览器 GPU 实时深度图' : mode === 'gaussians' ? '原始 Gaussian 参数的三维椭球抽样展示' : '交互彩色渲染';
   viewerFrame.contentWindow?.postMessage({ type: '3dgs-render-mode', mode }, location.origin);
 }
 
