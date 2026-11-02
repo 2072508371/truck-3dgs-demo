@@ -259,7 +259,7 @@
       return `${Math.round(x * 10000)},${Math.round(y * 10000)},${Math.round(z * 10000)}`;
     }
     async function loadBrowserFeature(activeViewer) {
-      if (!window.__gaussianViewerReady || !activeViewer?.splatMesh?.material?.uniforms?.uFeatureTexture) {
+      if (!window.__gaussianViewerReady) {
         setStatus('等待 Gaussian 模型完成加载…');
         return;
       }
@@ -272,6 +272,13 @@
       if (!hasFeatureData) throw new Error('此场景没有 DINOv2 特征数据');
       setStatus('正在载入 DINOv2 特征…');
       featureLoadPromise = (async () => {
+        let shaderReady = false;
+        for (let attempt = 0; attempt < 100 && viewer === activeViewer; attempt++) {
+          shaderReady = installRenderModes(activeViewer) && Boolean(activeViewer.splatMesh.material.uniforms.uFeatureTexture);
+          if (shaderReady) break;
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        if (!shaderReady) throw new Error('Gaussian 着色器未能初始化');
         const response = await fetch(`../assets/features/${demoId}-dinov2.bin`);
         if (!response.ok) throw new Error(`特征文件加载失败 (${response.status})`);
         const data = await response.arrayBuffer();
