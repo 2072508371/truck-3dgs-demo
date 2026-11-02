@@ -259,6 +259,10 @@
       return `${Math.round(x * 10000)},${Math.round(y * 10000)},${Math.round(z * 10000)}`;
     }
     async function loadBrowserFeature(activeViewer) {
+      if (!window.__gaussianViewerReady || !activeViewer?.splatMesh?.material?.uniforms?.uFeatureTexture) {
+        setStatus('等待 Gaussian 模型完成加载…');
+        return;
+      }
       if (featureTextureViewer === activeViewer) {
         setStatus('DINOv2 特征图已就绪');
         if (parent !== window) parent.postMessage({ type: '3dgs-feature-ready' }, location.origin);
@@ -302,11 +306,15 @@
         texture.minFilter = THREE.NearestFilter;
         texture.generateMipmaps = false;
         texture.needsUpdate = true;
+        const material = splats.material;
+        if (!material?.uniforms?.uFeatureTexture || !material.uniforms.uFeatureTextureSize) {
+          texture.dispose();
+          throw new Error('特征着色器尚未初始化');
+        }
         featureTexture?.dispose();
         featureTexture = texture;
         featureTextureViewer = activeViewer;
         featureByCenter.clear();
-        const material = splats.material;
         material.uniforms.uFeatureTexture.value = texture;
         material.uniforms.uFeatureTextureSize.value.set(width, height);
         if (viewer === activeViewer && renderMode === 'feature-dino') {
@@ -488,7 +496,8 @@
             if (lastGeometryMode !== mode) geometryOverlay.removeAttribute('src');
             lastGeometryMode = mode;
             queueGeometryRender(0);
-          } else loadBrowserFeature(viewer).catch(error => setStatus(`特征图不可用：${error.message}`));
+          } else if (window.__gaussianViewerReady) loadBrowserFeature(viewer).catch(error => setStatus(`特征图不可用：${error.message}`));
+          else setStatus('等待 Gaussian 模型完成加载…');
         }
         if (mode === 'normal') {
           if (parent !== window) parent.postMessage({ type: '3dgs-normal-source', source: browserNormal() ? 'browser' : 'cus' }, location.origin);
@@ -681,6 +690,7 @@
 
     async function buildViewer(position, lookAt, alpha) {
       const generation = ++viewerGeneration;
+      window.__gaussianViewerReady = false;
       const previousViewer = viewer;
       viewer = undefined;
       removeEllipsoidPreview();
